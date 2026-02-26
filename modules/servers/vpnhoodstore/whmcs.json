@@ -1,0 +1,21 @@
+﻿{
+  "schema": "1.0",
+  "type": "whmcs-servers",
+  "name": "vpnhoodstore",
+  "license": "free",
+  "category": "digitalservices",
+  "description": {
+    "name": "VpnHoodStore",
+    "tagline": "Provisioning module that automates the sale and management of VpnHood access tokens.",
+    "long": ""
+  },
+  "support": {
+    "docs_url": "https://vpnhood.com"
+  },
+  "authors": [
+    {
+      "name": "VpnHood!",
+      "homepage": "https:\/\/www.vpnhood.com\/"
+    }
+  ]
+}
