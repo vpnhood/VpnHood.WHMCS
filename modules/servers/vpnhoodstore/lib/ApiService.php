@@ -3,6 +3,7 @@
 namespace WHMCS\Module\Server\VpnHoodStore;
 
 use Exception;
+use JetBrains\PhpStorm\NoReturn;
 use WHMCS\Database\Capsule;
 use WHMCS\Module\Server\VpnHoodStore\AsyncApiClientFactory;
 
@@ -51,6 +52,10 @@ class ApiService
         return ($this->client)("/projects/{$this->projectId}/access-tokens/{$accessTokenId}", 'GET');
     }
 
+    public function getAccessCodeCsvFile(string $customerId, string $orderId): string{
+        return ($this->client)("/projects/{$this->projectId}/access-tokens/export-csv?customerId={$customerId}&orderId={$orderId}&shopId=WHMCS", 'GET');
+    }
+
     public function getServerFarms(): array{
         $serverFarms = ($this->client)("/projects/{$this->projectId}/server-farms", 'GET');
         return json_decode($serverFarms);
@@ -59,5 +64,9 @@ class ApiService
     public function getAccessTokenProfiles(): array{
         $accessTokenProfiles = ($this->client)("/projects/{$this->projectId}/access-token-profiles", 'GET');
         return json_decode($accessTokenProfiles);
+    }
+    public function getAccessTokenGroups(): array{
+        $accessTokenGroups = ($this->client)("/projects/{$this->projectId}/access-token-groups", 'GET');
+        return json_decode($accessTokenGroups);
     }
 }

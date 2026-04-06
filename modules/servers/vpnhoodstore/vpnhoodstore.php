@@ -21,24 +21,35 @@ function vpnhoodstore_MetaData(): array {
     );
 }
 
+/*** Fetch the access code options from the API for product settings in the admin area. ***/
 function vpnhoodstore_ConfigOptions(): array {
     try {
-        // Fetch the access code from the API.
         $apiService = new ApiService();
         $serverFarms = $apiService->getServerFarms();
         $accessTokenProfiles = $apiService->getAccessTokenProfiles();
+        $accessTokenGroups = $apiService->getAccessTokenGroups();
 
-        // Build options array from server farms
+        // Build options array from server farms.
         $serverFarmOptions = [];
         foreach ($serverFarms as $item) {
             $serverFarmOptions[$item->serverFarm->serverFarmId] = $item->serverFarm->serverFarmName;
         }
 
-        // Build options array from server farms
+        // Build options array from access token profiles.
         $accessTokenProfileOptions = [];
         foreach ($accessTokenProfiles as $item) {
             $accessTokenProfileOptions[$item->accessTokenProfileId] = $item->accessTokenProfileName;
         }
+
+        // Build options array from access token groups.
+        $accessTokenGroupOptions = [];
+        $accessTokenGroupOptions[0] = 'None'; // Add a default option for "None"
+        foreach ($accessTokenGroups as $item) {
+            $accessTokenGroupOptions[$item->accessTokenGroupId] = $item->accessTokenGroupName;
+        }
+
+        // Build options array for token delivery methods.
+        $tokenDeliveryMethods = ["Normal", "CSV"];
 
         return [
             "serverFarmId" => [
@@ -52,12 +63,26 @@ function vpnhoodstore_ConfigOptions(): array {
                 "Type" => "text",
                 "Size" => "30",
                 "Description" => "The name you want to use to create tokens.",
-                "Default" => "Premium Code",
+                "Default" => "VpnHood Official",
             ],
-            "accessTokenProfileId" => [
+            "accessTokenProfilesId" => [
                 "FriendlyName" => "Access Token Profile",
                 "Type" => "dropdown",
                 "Options" => $accessTokenProfileOptions,
+                "Default" => "",
+            ],
+            "tokenDelivery" => [
+                "FriendlyName" => "Token Delivery Method",
+                "Type" => "dropdown",
+                "Options" => $tokenDeliveryMethods,
+                "Description" => "The CSV is for the resellers and returns a download link in the client area.",
+                "Default" => "Normal",
+            ],
+            "accessTokenGroupsId" => [
+                "FriendlyName" => "Access Token Groups",
+                "Type" => "dropdown",
+                "Options" => $accessTokenGroupOptions,
+                "Description" => "Only work if Token Delivery Method is CSV.",
                 "Default" => "",
             ],
         ];
@@ -76,31 +101,26 @@ function vpnhoodstore_ConfigOptions(): array {
 
 function vpnhoodstore_CreateAccount(array $params): string {
     try {
-        $apiService = new ApiService();
+        $isNormalTokenDelivery = $params['configoption4'] == 0; //0 is normal and 1 is CSV for reseller
 
+        // Access Token create params
         $createParams = [
             'accessTokenProfileId' => $params['configoption3'],
             'serverFarmId'         => $params['configoption1'],
+            'accessTokenGroupId'   => $isNormalTokenDelivery ? null : $params['configoption5'], //Only set group id for CSV (Reseller)
             'accessTokenName'      => $params['configoption2'],
-            'count'                => 1,
+            'count'                => $isNormalTokenDelivery ? 1 : (int)$params['qty'], //Only set quantity for CSV (Reseller)
             'customerId'           => (string)$params['userid'],
-            'expirationTime'       => $params['model']['nextduedate'],
-            'orderId'              => (string)$params['serviceid'],
+            'expirationTime'       => $isNormalTokenDelivery ? $params['model']['nextduedate'] : null, //Do not set expiration time for CSV (Reseller)
+            'orderId'              => (string)$params['model']['orderid'],
             'shopId'               => 'WHMCS'
         ];
 
-        $response = $apiService->createAccessToken($createParams);
-        $data = json_decode($response, true);
+        if ($isNormalTokenDelivery)
+            Helper::createAccessToken($params, $createParams);
+        else
+            Helper::createAccessTokenList($createParams);
 
-        // Check if data exists and is the expected array
-        if (!isset($data[0]['accessTokenId'])) {
-            throw new Exception("Invalid API Response: Missing Access Token ID");
-        }
-
-        $accessTokenId = $data[0]['accessTokenId'];
-
-        // Save the accessTokenId to the service properties.
-        $params['model']->serviceProperties->save(['accessTokenId' => $accessTokenId]);
         return 'success';
     }
     catch (Exception $e) {
@@ -127,19 +147,25 @@ function vpnhoodstore_TerminateAccount(array $params): string{
 }
 
 function vpnhoodstore_ClientArea(array $params): array {
-    $accessTokenId = null;
+    $isNormalTokenDelivery = $params['configoption4'] == 0; //0 is normal and 1 is CSV for reseller
 
     // Fetch the access code from the API through the AJAX request.
     if (isset($_SERVER['HTTP_X_REQUESTED_WITH']) && $_SERVER['HTTP_X_REQUESTED_WITH'] === 'XMLHttpRequest') {
         try {
-            $accessTokenId = $params['model']->serviceProperties->get('accessTokenId');
 
-            // Fetch the access code from the API.
-            $apiService = new ApiService();
-            $response = $apiService->getAccessCode($accessTokenId);
-            $jsonResult = json_decode($response);
-            $accessCode = $jsonResult->accessToken->accessCode;
-            echo $accessCode;
+            // Returns Access Code as Normal Token Delivery in the client area
+            if ($isNormalTokenDelivery){
+               $accessTokenId = $params['model']->serviceProperties->get('accessTokenId');
+                Helper::getAccessCode($accessTokenId);
+            }
+
+            // Returns a download link as CSV Token Delivery for resellers in the client area.
+            else{
+                $customerId = (string)$params['userid'];
+                $orderId = (string)$params['model']['orderid'];
+                Helper::getAccessCodeCsvFile($customerId, $orderId);
+            }
+
             exit;
         }
         catch (Exception $e) {
@@ -148,7 +174,7 @@ function vpnhoodstore_ClientArea(array $params): array {
             logModuleCall(
                 'VpnHoodStore',
                 'ClientArea',
-                sprintf('Access Token ID: %s', $accessTokenId),
+                sprintf('Is Normal Token Delivery: %s', $isNormalTokenDelivery),
                 sprintf('Error: %s', $e->getMessage())
             );
 
@@ -156,15 +182,11 @@ function vpnhoodstore_ClientArea(array $params): array {
             return array(
                 'tabOverviewReplacementTemplate' => 'error.tpl',
                 'templateVariables' => array(
-                    'usefulErrorHelper' => 'Error fetching access code: ' . $e->getMessage(),
+                    'usefulErrorHelper' => 'Error fetching access code or download link: ' . $e->getMessage(),
                 ),
             );
         }
     }
 
-    return array(
-        'templatefile' => 'clientarea',
-    );
+    return array('templatefile' => $isNormalTokenDelivery ? 'clientarea' : 'clientarea-reseller.tpl');
 }
-
-
