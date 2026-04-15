@@ -70,8 +70,60 @@ add_hook('ClientAreaPrimaryNavbar', 200, function($primaryNavbar) {
     }
 });
 
+add_hook('PreCalculateCartTotals', 1, function($vars) {
+    $settings = get_vpnhoodstore_addon_params();
 
+    // Exit if settings are missing or session cart has no products
+    if (!$settings || empty($_SESSION['cart']['products'])) {
+        return;
+    }
 
+    $currentUser = new \WHMCS\Authentication\CurrentUser;
+    $client = $currentUser->client();
+
+    // Check if the current client belongs to the authorized Reseller groups
+    $isAllowedClient = $client && in_array((int)$client->groupid, $settings->allowedClientGroups, true);
+
+    $wasModified = false;
+
+    foreach ($_SESSION['cart']['products'] as $key => $item) {
+        $pid = (int)$item['pid'];
+
+        // Get product group name to check restrictions
+        $productData = Capsule::table('tblproducts')
+            ->join('tblproductgroups', 'tblproducts.gid', '=', 'tblproductgroups.id')
+            ->where('tblproducts.id', $pid)
+            ->select('tblproductgroups.name as group_name')
+            ->first();
+
+        if ($productData) {
+            $isRestricted = in_array($productData->group_name, $settings->restrictedProductGroupNames);
+
+            /**
+             * Enforcement Logic:
+             * - If user is a Reseller but the product is Regular -> Remove
+             * - If user is Regular but the product is Restricted -> Remove
+             */
+            $isResellerBuyingRegular = ($isAllowedClient && !$isRestricted);
+            $isRegularBuyingRestricted = (!$isAllowedClient && $isRestricted);
+
+            if ($isResellerBuyingRegular || $isRegularBuyingRestricted) {
+                unset($_SESSION['cart']['products'][$key]);
+                $wasModified = true;
+            }
+        }
+    }
+
+    // If products were removed, re-index the array to prevent gaps in keys
+    if ($wasModified) {
+        $_SESSION['cart']['products'] = array_values($_SESSION['cart']['products']);
+
+        // If no products remain, clean up the session key
+        if (empty($_SESSION['cart']['products'])) {
+            unset($_SESSION['cart']['products']);
+        }
+    }
+});
 /**
  * Settings Helper
  */
