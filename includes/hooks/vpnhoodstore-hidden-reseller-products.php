@@ -124,6 +124,7 @@ add_hook('PreCalculateCartTotals', 1, function($vars) {
         }
     }
 });
+
 /**
  * Settings Helper
  */
