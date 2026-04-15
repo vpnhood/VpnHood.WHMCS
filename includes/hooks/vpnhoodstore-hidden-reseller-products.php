@@ -1,4 +1,22 @@
 ﻿<?php
+/**
+ * VpnHood Store - Product Visibility & Permission Enforcement
+ *
+ * Multi-layered restriction system for WHMCS 9+:
+ *   Layer 1: Navigation & sidebar menu filtering
+ *   Layer 2: Store/cart page access control (redirect)
+ *   Layer 3: Cart add validation (error message)
+ *   Layer 4: Cart contents cleanup (silent removal, safety net)
+ *   Layer 5: Checkout validation (final enforcement)
+ *
+ * Two-way logic:
+ *   - Allowed client groups see ONLY restricted product groups
+ *   - All other clients (including guests) see ONLY non-restricted product groups
+ *
+ * Configuration is read from the vpnhoodconfig addon module settings:
+ *   - AllowedClientGroups: comma-separated client group IDs
+ *   - RestrictedProductGroupNames: comma-separated product group names
+ */
 
 if (!defined('WHMCS')) {
     die('You cannot access this file directly.');
@@ -6,130 +24,15 @@ if (!defined('WHMCS')) {
 
 use WHMCS\Database\Capsule;
 
-/**
- * Helper to process menu filtering logic
- */
-function removeMenuBasedOnUserGroup($menuContainer, $settings) {
-    if (is_null($menuContainer) || !$menuContainer->hasChildren()) {
-        return;
-    }
-
-    $currentUser = new \WHMCS\Authentication\CurrentUser;
-    $client = $currentUser->client();
-
-    $resellerMenus = $settings->restrictedProductGroupNames;
-    $isAllowedClient = $client && in_array((int)$client->groupid, $settings->allowedClientGroups, true);
-
-    if (!$isAllowedClient) {
-        // CASE 1: Guest/Regular - Remove reseller items
-        foreach ($resellerMenus as $item) {
-            if (!is_null($menuContainer->getChild($item))) {
-                $menuContainer->removeChild($item);
-            }
-        }
-    } else {
-        // CASE 2: Reseller - Keep ONLY reseller items
-        // We collect names first to avoid modification issues during iteration
-        $toRemove = [];
-        foreach ($menuContainer->getChildren() as $child) {
-            $name = $child->getName();
-            if (!in_array($name, $resellerMenus)) {
-                $toRemove[] = $name;
-            }
-        }
-
-        foreach ($toRemove as $name) {
-            $menuContainer->removeChild($name);
-        }
-    }
-}
+// =====================================================================
+// HELPER FUNCTIONS
+// =====================================================================
 
 /**
- * Hook for Secondary Sidebar (Categories)
+ * Load addon settings (cached per request).
  */
-add_hook('ClientAreaSecondarySidebar', 200, function ($secondarySidebar) {
-    $settings = get_vpnhoodstore_addon_params();
-    $categoriesMenu = $secondarySidebar->getChild('Categories');
-
-    if ($settings && $categoriesMenu) {
-        // 'Categories' is the standard internal name for the product group sidebar
-        removeMenuBasedOnUserGroup($categoriesMenu, $settings);
-    }
-});
-
-/**
- * Hook for Primary Navbar (Store/Categories)
- */
-add_hook('ClientAreaPrimaryNavbar', 200, function($primaryNavbar) {
-    $settings = get_vpnhoodstore_addon_params();
-    $storeMenu = $primaryNavbar->getChild('Store');
-
-    if ($settings && $storeMenu) {
-        // Note: This filters the dropdown items under 'Store'
-        removeMenuBasedOnUserGroup($storeMenu, $settings);
-    }
-});
-
-add_hook('PreCalculateCartTotals', 1, function($vars) {
-    $settings = get_vpnhoodstore_addon_params();
-
-    // Exit if settings are missing or session cart has no products
-    if (!$settings || empty($_SESSION['cart']['products'])) {
-        return;
-    }
-
-    $currentUser = new \WHMCS\Authentication\CurrentUser;
-    $client = $currentUser->client();
-
-    // Check if the current client belongs to the authorized Reseller groups
-    $isAllowedClient = $client && in_array((int)$client->groupid, $settings->allowedClientGroups, true);
-
-    $wasModified = false;
-
-    foreach ($_SESSION['cart']['products'] as $key => $item) {
-        $pid = (int)$item['pid'];
-
-        // Get product group name to check restrictions
-        $productData = Capsule::table('tblproducts')
-            ->join('tblproductgroups', 'tblproducts.gid', '=', 'tblproductgroups.id')
-            ->where('tblproducts.id', $pid)
-            ->select('tblproductgroups.name as group_name')
-            ->first();
-
-        if ($productData) {
-            $isRestricted = in_array($productData->group_name, $settings->restrictedProductGroupNames);
-
-            /**
-             * Enforcement Logic:
-             * - If user is a Reseller but the product is Regular -> Remove
-             * - If user is Regular but the product is Restricted -> Remove
-             */
-            $isResellerBuyingRegular = ($isAllowedClient && !$isRestricted);
-            $isRegularBuyingRestricted = (!$isAllowedClient && $isRestricted);
-
-            if ($isResellerBuyingRegular || $isRegularBuyingRestricted) {
-                unset($_SESSION['cart']['products'][$key]);
-                $wasModified = true;
-            }
-        }
-    }
-
-    // If products were removed, re-index the array to prevent gaps in keys
-    if ($wasModified) {
-        $_SESSION['cart']['products'] = array_values($_SESSION['cart']['products']);
-
-        // If no products remain, clean up the session key
-        if (empty($_SESSION['cart']['products'])) {
-            unset($_SESSION['cart']['products']);
-        }
-    }
-});
-/**
- * Settings Helper
- */
-function get_vpnhoodstore_addon_params(): object | null {
-    // Using a static variable to cache settings so it only queries the DB once
-    // per page load, even if both hooks are called.
+function get_vpnhoodstore_addon_params(): object|null
+{
     static $cachedSettings = null;
 
     if ($cachedSettings !== null) {
@@ -140,17 +43,267 @@ function get_vpnhoodstore_addon_params(): object | null {
         ->where('module', 'vpnhoodconfig')
         ->pluck('value', 'setting');
 
-    $keyGroups = 'AllowedClientGroups';
+    $keyGroups   = 'AllowedClientGroups';
     $keyProducts = 'RestrictedProductGroupNames';
 
     if (empty($data[$keyGroups]) || empty($data[$keyProducts])) {
         return null;
     }
 
-    $cachedSettings = (object)[
+    $cachedSettings = (object) [
         'allowedClientGroups'         => array_map('intval', explode(',', $data[$keyGroups])),
-        'restrictedProductGroupNames' => array_map('trim', explode(',', $data[$keyProducts]))
+        'restrictedProductGroupNames' => array_map('trim', explode(',', $data[$keyProducts])),
     ];
 
     return $cachedSettings;
 }
+
+/**
+ * Check whether the current client belongs to an allowed group (cached per request).
+ */
+function vpnhood_is_client_allowed(): bool
+{
+    static $result = null;
+    if ($result !== null) {
+        return $result;
+    }
+
+    $settings = get_vpnhoodstore_addon_params();
+    if (!$settings) {
+        $result = false;
+        return false;
+    }
+
+    $currentUser = new \WHMCS\Authentication\CurrentUser;
+    $client      = $currentUser->client();
+    $result      = $client && in_array((int) $client->groupid, $settings->allowedClientGroups, true);
+
+    return $result;
+}
+
+/**
+ * Check whether a product belongs to a restricted product group.
+ */
+function vpnhood_is_product_restricted(int $pid): bool
+{
+    static $cache = [];
+    if (isset($cache[$pid])) {
+        return $cache[$pid];
+    }
+
+    $settings = get_vpnhoodstore_addon_params();
+    if (!$settings) {
+        return $cache[$pid] = false;
+    }
+
+    $groupName = Capsule::table('tblproducts')
+        ->join('tblproductgroups', 'tblproducts.gid', '=', 'tblproductgroups.id')
+        ->where('tblproducts.id', $pid)
+        ->value('tblproductgroups.name');
+
+    return $cache[$pid] = $groupName && in_array($groupName, $settings->restrictedProductGroupNames);
+}
+
+/**
+ * Check whether a product group is restricted by its ID.
+ */
+function vpnhood_is_group_restricted(int $gid): bool
+{
+    static $cache = [];
+    if (isset($cache[$gid])) {
+        return $cache[$gid];
+    }
+
+    $settings = get_vpnhoodstore_addon_params();
+    if (!$settings) {
+        return $cache[$gid] = false;
+    }
+
+    $groupName = Capsule::table('tblproductgroups')
+        ->where('id', $gid)
+        ->value('name');
+
+    return $cache[$gid] = $groupName && in_array($groupName, $settings->restrictedProductGroupNames);
+}
+
+/**
+ * Determine if the current client should be denied access to a product/group.
+ *
+ * Two-way enforcement:
+ *   - Non-allowed client accessing restricted item  → deny
+ *   - Allowed client accessing non-restricted item  → deny
+ */
+function vpnhood_should_deny(bool $isRestricted): bool
+{
+    $isAllowed = vpnhood_is_client_allowed();
+    return (!$isAllowed && $isRestricted) || ($isAllowed && !$isRestricted);
+}
+
+// =====================================================================
+// LAYER 1 – NAVIGATION & SIDEBAR FILTERING
+// =====================================================================
+
+/**
+ * Filter children of a menu container based on client group.
+ */
+function removeMenuBasedOnUserGroup($menuContainer, $settings)
+{
+    if (is_null($menuContainer) || !$menuContainer->hasChildren()) {
+        return;
+    }
+
+    $restrictedNames = $settings->restrictedProductGroupNames;
+    $isAllowed       = vpnhood_is_client_allowed();
+
+    if (!$isAllowed) {
+        // Regular / guest – remove restricted items
+        foreach ($restrictedNames as $item) {
+            if (!is_null($menuContainer->getChild($item))) {
+                $menuContainer->removeChild($item);
+            }
+        }
+    } else {
+        // Allowed client – keep ONLY restricted items
+        $toRemove = [];
+        foreach ($menuContainer->getChildren() as $child) {
+            if (!in_array($child->getName(), $restrictedNames)) {
+                $toRemove[] = $child->getName();
+            }
+        }
+        foreach ($toRemove as $name) {
+            $menuContainer->removeChild($name);
+        }
+    }
+}
+
+add_hook('ClientAreaSecondarySidebar', 200, function ($secondarySidebar) {
+    $settings      = get_vpnhoodstore_addon_params();
+    $categoriesMenu = $secondarySidebar->getChild('Categories');
+
+    if ($settings && $categoriesMenu) {
+        removeMenuBasedOnUserGroup($categoriesMenu, $settings);
+    }
+});
+
+add_hook('ClientAreaPrimaryNavbar', 200, function ($primaryNavbar) {
+    $settings  = get_vpnhoodstore_addon_params();
+    $storeMenu = $primaryNavbar->getChild('Store');
+
+    if ($settings && $storeMenu) {
+        removeMenuBasedOnUserGroup($storeMenu, $settings);
+    }
+});
+
+// =====================================================================
+// LAYER 2 – STORE / CART PAGE ACCESS CONTROL
+// Redirect if the client tries to browse a restricted product group
+// or access a restricted product directly via URL.
+// =====================================================================
+
+add_hook('ClientAreaPageCart', 1, function ($vars) {
+    $settings = get_vpnhoodstore_addon_params();
+    if (!$settings) {
+        return;
+    }
+
+    // Product group page: cart.php?gid=X or /store/{slug}
+    $gid = isset($_GET['gid']) ? (int) $_GET['gid'] : 0;
+    if ($gid > 0 && vpnhood_should_deny(vpnhood_is_group_restricted($gid))) {
+        vpnhood_redirect_away();
+    }
+
+    // Direct product access: cart.php?a=add&pid=X, cart.php?a=confproduct&i=…
+    $pid = isset($_GET['pid']) ? (int) $_GET['pid'] : 0;
+    if ($pid > 0 && vpnhood_should_deny(vpnhood_is_product_restricted($pid))) {
+        vpnhood_redirect_away();
+    }
+});
+
+/**
+ * Safe redirect to the WHMCS client area home page.
+ */
+function vpnhood_redirect_away(): void
+{
+    $systemUrl = rtrim(\WHMCS\Config\Setting::getValue('SystemURL'), '/');
+    header('Location: ' . $systemUrl . '/index.php');
+    exit;
+}
+
+// =====================================================================
+// LAYER 3 – CART ADD VALIDATION
+// Return a human-readable error when an unauthorised client tries to
+// add a restricted product to the cart (covers AJAX & form POSTs).
+// =====================================================================
+
+add_hook('ShoppingCartValidateProductUpdate', 1, function ($vars) {
+    $settings = get_vpnhoodstore_addon_params();
+    if (!$settings) {
+        return [];
+    }
+
+    $pid = (int) ($vars['pid'] ?? ($_REQUEST['pid'] ?? 0));
+    if ($pid <= 0) {
+        return [];
+    }
+
+    if (vpnhood_should_deny(vpnhood_is_product_restricted($pid))) {
+        return ['You do not have permission to order this product.'];
+    }
+
+    return [];
+});
+
+// =====================================================================
+// LAYER 4 – CART CONTENTS CLEANUP  (silent safety net)
+// Silently removes any restricted products that somehow ended up in the
+// session cart (e.g. session tampering, race conditions).
+// =====================================================================
+
+add_hook('PreCalculateCartTotals', 1, function ($vars) {
+    $settings = get_vpnhoodstore_addon_params();
+
+    if (!$settings || empty($_SESSION['cart']['products'])) {
+        return;
+    }
+
+    $wasModified = false;
+
+    foreach ($_SESSION['cart']['products'] as $key => $item) {
+        $pid          = (int) $item['pid'];
+        $isRestricted = vpnhood_is_product_restricted($pid);
+
+        if (vpnhood_should_deny($isRestricted)) {
+            unset($_SESSION['cart']['products'][$key]);
+            $wasModified = true;
+        }
+    }
+
+    if ($wasModified) {
+        $_SESSION['cart']['products'] = array_values($_SESSION['cart']['products']);
+
+        if (empty($_SESSION['cart']['products'])) {
+            unset($_SESSION['cart']['products']);
+        }
+    }
+});
+
+// =====================================================================
+// LAYER 5 – CHECKOUT VALIDATION  (final enforcement)
+// Even if all other layers somehow miss it, block the actual checkout.
+// =====================================================================
+
+add_hook('ShoppingCartValidateCheckout', 1, function ($vars) {
+    $settings = get_vpnhoodstore_addon_params();
+    if (!$settings || empty($_SESSION['cart']['products'])) {
+        return [];
+    }
+
+    foreach ($_SESSION['cart']['products'] as $item) {
+        $pid = (int) $item['pid'];
+        if (vpnhood_should_deny(vpnhood_is_product_restricted($pid))) {
+            return ['Your cart contains products you are not authorized to purchase. Please remove them and try again.'];
+        }
+    }
+
+    return [];
+});
