@@ -196,8 +196,10 @@ add_hook('ClientAreaPrimaryNavbar', 200, function ($primaryNavbar) {
 
 // =====================================================================
 // LAYER 2 – STORE / CART PAGE ACCESS CONTROL
-// Redirect if the client tries to browse a restricted product group
-// or access a restricted product directly via URL.
+//   a) Filter product group listings on the main store page
+//   b) Filter individual products within a group page
+//   c) Redirect if the client tries to browse a restricted group or
+//      product directly via URL
 // =====================================================================
 
 add_hook('ClientAreaPageCart', 1, function ($vars) {
@@ -206,17 +208,55 @@ add_hook('ClientAreaPageCart', 1, function ($vars) {
         return;
     }
 
-    // Product group page: cart.php?gid=X or /store/{slug}
+    // --- 2c: Redirect on direct gid/pid URL access ---
+
     $gid = isset($_GET['gid']) ? (int) $_GET['gid'] : 0;
     if ($gid > 0 && vpnhood_should_deny(vpnhood_is_group_restricted($gid))) {
         vpnhood_redirect_away();
     }
 
-    // Direct product access: cart.php?a=add&pid=X, cart.php?a=confproduct&i=…
     $pid = isset($_GET['pid']) ? (int) $_GET['pid'] : 0;
     if ($pid > 0 && vpnhood_should_deny(vpnhood_is_product_restricted($pid))) {
         vpnhood_redirect_away();
     }
+
+    $overrides = [];
+
+    // --- 2a: Filter product groups on the store landing page ---
+
+    if (!empty($vars['productgroups'])) {
+        $filtered = [];
+        foreach ($vars['productgroups'] as $group) {
+            $groupId   = (int) ($group['gid'] ?? $group['id'] ?? 0);
+            $groupName = $group['name'] ?? '';
+
+            $isRestricted = in_array($groupName, $settings->restrictedProductGroupNames);
+            if ($groupId > 0 && !$isRestricted) {
+                $isRestricted = vpnhood_is_group_restricted($groupId);
+            }
+
+            if (!vpnhood_should_deny($isRestricted)) {
+                $filtered[] = $group;
+            }
+        }
+        $overrides['productgroups'] = $filtered;
+    }
+
+    // --- 2b: Filter individual products within a group page ---
+
+    if (!empty($vars['products'])) {
+        $filtered = [];
+        foreach ($vars['products'] as $product) {
+            $productId = (int) ($product['pid'] ?? $product['id'] ?? 0);
+            if ($productId > 0 && vpnhood_should_deny(vpnhood_is_product_restricted($productId))) {
+                continue;
+            }
+            $filtered[] = $product;
+        }
+        $overrides['products'] = $filtered;
+    }
+
+    return $overrides;
 });
 
 /**
