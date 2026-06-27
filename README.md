@@ -3,6 +3,10 @@
 This package includes:
 - `vpnhoodstore`: WHMCS provisioning module for VpnHood
 - `vpnhoodconfig`: Addon module for global API settings
+- `vpnhoodpartnerhub`: Wholesale addon — lets external partner WHMCS installs order and
+  provision VpnHood keys against this WHMCS using their prepaid credit
+  (see [modules/addons/vpnhoodpartnerhub/README.md](modules/addons/vpnhoodpartnerhub/README.md)).
+  The partner-side connector module lives in the separate **VpnHood.WHMCS.Partner** repo.
 
 ## Installation
 
