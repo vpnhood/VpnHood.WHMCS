@@ -93,7 +93,9 @@ mod_vpnhood_partner_log
    1. `localAPI('AddOrder')` — creates order + invoice; WHMCS auto-applies the client's
       credit to the invoice.
    2. `assertInvoicePaid` — **before provisioning**, require invoice `Paid`; otherwise
-      roll back (`DeleteOrder`) and throw `402`.
+      roll back and throw `402`. Rollback is `CancelOrder` then `DeleteOrder` (WHMCS refuses
+      to delete an order unless it is Cancelled/Fraud), and both results are logged to
+      `mod_vpnhood_partner_log` (action `rollback`) so an incomplete teardown is never silent.
    3. `localAPI('AcceptOrder', autosetup)` — runs `vpnhoodstore_CreateAccount`.
    4. `readDelivery` — read `accessTokenId` from the service's `serviceProperties` and
       fetch the access code via `ApiService::getAccessCode` (or CSV for bulk).

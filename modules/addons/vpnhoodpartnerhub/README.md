@@ -91,8 +91,8 @@ curl -X POST https://store.example.com/modules/addons/vpnhoodpartnerhub/api.php 
 ## Safety model
 
 - **Credit is the hard limit.** The order endpoint checks that the generated invoice was
-  settled from credit before provisioning; if not, the order is rolled back (`DeleteOrder`)
-  and a `402` is returned — nothing is provisioned on insufficient credit.
+  settled from credit before provisioning; if not, the order is rolled back (`CancelOrder`
+  then `DeleteOrder`) and a `402` is returned — nothing is provisioned on insufficient credit.
 - **Scoped authorization.** Every action is scoped to the partner's own `client_id`; a
   partner can only order mapped products and only act on their own services.
 - **Secret at rest.** The API secret is stored hashed (`password_hash`) and verified with
