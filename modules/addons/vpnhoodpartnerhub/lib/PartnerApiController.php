@@ -376,12 +376,41 @@ class PartnerApiController
         return $result;
     }
 
+    /**
+     * Fully remove a failed order (order + invoice + provisioned service).
+     *
+     * WHMCS DeleteOrder refuses unless the order is Cancelled/Fraud
+     * ("The order status must be in Cancelled or Fraud to be deleted"), so we
+     * cancel first and then delete. Both calls are best-effort and their results
+     * are logged so an incomplete rollback is never silent.
+     */
     private function safeDeleteOrder(int $orderId): void
     {
+        $cancel = $this->tryLocalApi('CancelOrder', ['orderid' => $orderId, 'cancelsub' => false]);
+        $delete = $this->tryLocalApi('DeleteOrder', ['orderid' => $orderId]);
+
         try {
-            localAPI('DeleteOrder', ['orderid' => $orderId]);
+            $this->repo->log(
+                (int) ($this->partner['id'] ?? 0),
+                'rollback',
+                null,
+                0,
+                ['orderid' => $orderId],
+                ['cancel' => $cancel, 'delete' => $delete]
+            );
         } catch (\Throwable $e) {
-            // Best-effort rollback; surface nothing further.
+            // Logging must never break rollback.
+        }
+    }
+
+    /** Run a localAPI action without throwing; return the raw result (or an error array). */
+    private function tryLocalApi(string $action, array $params): array
+    {
+        try {
+            $params['responsetype'] = 'json';
+            return localAPI($action, $params);
+        } catch (\Throwable $e) {
+            return ['result' => 'exception', 'message' => $e->getMessage()];
         }
     }
 
