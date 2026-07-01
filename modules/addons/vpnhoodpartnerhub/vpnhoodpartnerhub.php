@@ -160,9 +160,13 @@ function vpnhoodpartnerhub_output(array $vars): void
             $sub = $_POST['do'] ?? '';
             if ($sub === 'save') {
                 $partnerId = (int) ($_POST['id'] ?? 0);
+                $clientId = (int) ($_POST['client_id'] ?? 0);
+                if ($clientId <= 0) {
+                    throw new \RuntimeException('Please select a WHMCS client for this partner.');
+                }
                 $data = [
-                    'client_id'    => (int) $_POST['client_id'],
-                    'name'         => trim($_POST['name'] ?? ''),
+                    'client_id'    => $clientId,
+                    'name'         => $repo->clientDisplayName($clientId),
                     'status'       => ($_POST['status'] ?? 'active') === 'suspended' ? 'suspended' : 'active',
                     'ip_allowlist' => trim($_POST['ip_allowlist'] ?? ''),
                 ];
@@ -189,13 +193,20 @@ function vpnhoodpartnerhub_output(array $vars): void
                 $_REQUEST['id'] = $partnerId;
             } elseif ($sub === 'product_add') {
                 $partnerId = (int) $_POST['partner_id'];
+                $productId = (int) ($_POST['whmcs_product_id'] ?? 0);
+                if ($productId <= 0) {
+                    throw new \RuntimeException('Please select a product.');
+                }
+                if ($repo->productMappingExists($partnerId, $productId)) {
+                    throw new \RuntimeException('That product is already mapped to this partner.');
+                }
                 $repo->addProductMapping($partnerId, [
-                    'downstream_ref'       => trim($_POST['downstream_ref']),
-                    'whmcs_product_id'     => (int) $_POST['whmcs_product_id'],
-                    'billing_cycle_months' => max(1, (int) $_POST['billing_cycle_months']),
-                    'enabled'              => isset($_POST['enabled']) ? 1 : 0,
+                    'downstream_ref'       => (string) $productId,
+                    'whmcs_product_id'     => $productId,
+                    'billing_cycle_months' => $repo->productBillingCycleMonths($productId),
+                    'enabled'              => 1,
                 ]);
-                $notice = 'Product mapping added.';
+                $notice = 'Product added.';
                 $noticeType = 'success';
                 $action = 'edit';
                 $_REQUEST['id'] = $partnerId;
@@ -205,6 +216,11 @@ function vpnhoodpartnerhub_output(array $vars): void
                 $noticeType = 'success';
                 $action = 'edit';
                 $_REQUEST['id'] = (int) $_POST['partner_id'];
+            } elseif ($sub === 'partner_delete') {
+                $repo->deletePartner((int) $_POST['id']);
+                $notice = 'Partner removed.';
+                $noticeType = 'success';
+                $action = 'list';
             }
         } catch (\Throwable $e) {
             $notice = 'Error: ' . htmlspecialchars($e->getMessage());
@@ -232,24 +248,30 @@ function vpnhoodpartnerhub_renderList(PartnerRepository $repo, string $modulelin
 
     echo '<p><a href="' . $modulelink . '&action=new" class="btn btn-primary">+ Add Partner</a></p>';
     echo '<table class="table table-striped"><thead><tr>'
-        . '<th>ID</th><th>Name</th><th>WHMCS Client</th><th>API Key</th>'
+        . '<th>ID</th><th>Client</th><th>API Key</th>'
         . '<th>Status</th><th>Credit Balance</th><th>Products</th><th></th></tr></thead><tbody>';
 
     if (empty($partners)) {
-        echo '<tr><td colspan="8" class="text-center text-muted">No partners yet.</td></tr>';
+        echo '<tr><td colspan="7" class="text-center text-muted">No partners yet.</td></tr>';
     }
 
     foreach ($partners as $p) {
         $badge = $p['status'] === 'active' ? 'success' : 'default';
+        $clientUrl = 'clientssummary.php?userid=' . (int) $p['client_id'];
         echo '<tr>'
             . '<td>' . (int) $p['id'] . '</td>'
-            . '<td>' . htmlspecialchars($p['name']) . '</td>'
-            . '<td>#' . (int) $p['client_id'] . ' ' . htmlspecialchars($p['client_name']) . '</td>'
+            . '<td><a href="' . $clientUrl . '">#' . (int) $p['client_id'] . ' '
+            . htmlspecialchars($p['client_name']) . '</a></td>'
             . '<td><code>' . htmlspecialchars($p['api_key']) . '</code></td>'
             . '<td><span class="label label-' . $badge . '">' . htmlspecialchars($p['status']) . '</span></td>'
             . '<td>' . htmlspecialchars($p['balance_formatted']) . '</td>'
             . '<td>' . (int) $p['product_count'] . '</td>'
-            . '<td><a class="btn btn-sm btn-default" href="' . $modulelink . '&action=edit&id=' . (int) $p['id'] . '">Manage</a></td>'
+            . '<td><a class="btn btn-sm btn-default" href="' . $modulelink . '&action=edit&id=' . (int) $p['id'] . '">Manage</a> '
+            . '<form method="post" action="' . $modulelink . '" style="display:inline"'
+            . ' onsubmit="return confirm(\'Delete this partner? Its product mappings and logs are removed. This cannot be undone.\');">'
+            . '<input type="hidden" name="do" value="partner_delete">'
+            . '<input type="hidden" name="id" value="' . (int) $p['id'] . '">'
+            . '<button type="submit" class="btn btn-sm btn-danger">Delete</button></form></td>'
             . '</tr>';
     }
 
@@ -270,13 +292,22 @@ function vpnhoodpartnerhub_renderEditForm(PartnerRepository $repo, string $modul
     echo '<form method="post" action="' . $modulelink . '">';
     echo '<input type="hidden" name="do" value="save">';
     echo '<input type="hidden" name="id" value="' . ($isEdit ? (int) $partner['id'] : 0) . '">';
-    echo '<div class="form-group"><label>Partner Name</label>'
-        . '<input type="text" name="name" class="form-control" required value="'
-        . ($isEdit ? htmlspecialchars($partner['name']) : '') . '"></div>';
-    echo '<div class="form-group"><label>WHMCS Client ID (holds the credit balance)</label>'
-        . '<input type="number" name="client_id" class="form-control" required value="'
-        . ($isEdit ? (int) $partner['client_id'] : '') . '">'
-        . '<p class="help-block">The client account in THIS WHMCS whose credit balance is charged for the partner\'s orders.</p></div>';
+
+    $clients = $repo->whmcsClients();
+    $currentClientId = $isEdit ? (int) $partner['client_id'] : 0;
+    echo '<div class="form-group"><label>WHMCS Client (holds the credit balance)</label>'
+        . '<select id="vh-client-select" name="client_id" class="form-control" required>';
+    echo '<option value="">— Select a client —</option>';
+    foreach ($clients as $c) {
+        $selected = ((int) $c['id'] === $currentClientId) ? ' selected' : '';
+        echo '<option value="' . (int) $c['id'] . '"' . $selected . '>' . htmlspecialchars($c['label']) . '</option>';
+    }
+    echo '</select>'
+        . '<p class="help-block">The client account in THIS WHMCS whose credit balance is charged for the'
+        . ' partner\'s orders. The partner name is taken from this client.</p></div>';
+    // Upgrade to a searchable dropdown when the WHMCS admin select2 is available; a plain select otherwise.
+    echo '<script>if (window.jQuery && jQuery.fn.select2) {'
+        . ' jQuery(function(){ jQuery("#vh-client-select").select2({width:"100%"}); }); }</script>';
     echo '<div class="form-group"><label>Status</label><select name="status" class="form-control">'
         . '<option value="active"' . ($isEdit && $partner['status'] === 'active' ? ' selected' : '') . '>Active</option>'
         . '<option value="suspended"' . ($isEdit && $partner['status'] === 'suspended' ? ' selected' : '') . '>Suspended</option>'
@@ -303,16 +334,16 @@ function vpnhoodpartnerhub_renderEditForm(PartnerRepository $repo, string $modul
     echo '<hr><h4>Allowed Products</h4>';
     $mappings = $repo->getProductMappings($partnerId);
     echo '<table class="table table-condensed"><thead><tr>'
-        . '<th>Downstream Ref</th><th>Our Product</th><th>Cycle (months)</th><th>Enabled</th><th></th></tr></thead><tbody>';
+        . '<th>Product</th><th>Available Cycles</th><th></th></tr></thead><tbody>';
     if (empty($mappings)) {
-        echo '<tr><td colspan="5" class="text-muted">No products mapped. Partner cannot order until at least one is added.</td></tr>';
+        echo '<tr><td colspan="3" class="text-muted">No products mapped. Partner cannot order until at least one is added.</td></tr>';
     }
     foreach ($mappings as $m) {
+        $cycles = $repo->productAvailableCycles((int) $m['whmcs_product_id']);
+        $cyclesText = $cycles ? implode(', ', $cycles) : '—';
         echo '<tr>'
-            . '<td><code>' . htmlspecialchars($m['downstream_ref']) . '</code></td>'
             . '<td>#' . (int) $m['whmcs_product_id'] . ' ' . htmlspecialchars($m['product_name']) . '</td>'
-            . '<td>' . (int) $m['billing_cycle_months'] . '</td>'
-            . '<td>' . ($m['enabled'] ? 'Yes' : 'No') . '</td>'
+            . '<td>' . htmlspecialchars($cyclesText) . '</td>'
             . '<td><form method="post" action="' . $modulelink . '" style="margin:0">'
             . '<input type="hidden" name="do" value="product_delete">'
             . '<input type="hidden" name="partner_id" value="' . (int) $partner['id'] . '">'
@@ -322,18 +353,16 @@ function vpnhoodpartnerhub_renderEditForm(PartnerRepository $repo, string $modul
     }
     echo '</tbody></table>';
 
-    // Add mapping form
+    // Add mapping form: pick a product; its billing cycle is derived automatically.
     $products = $repo->whmcsProducts();
     echo '<form method="post" action="' . $modulelink . '" class="form-inline">';
     echo '<input type="hidden" name="do" value="product_add"><input type="hidden" name="partner_id" value="' . (int) $partner['id'] . '">';
-    echo '<input type="text" name="downstream_ref" class="form-control" placeholder="Downstream ref (e.g. vpn-monthly)" required> ';
     echo '<select name="whmcs_product_id" class="form-control" required>';
+    echo '<option value="">— Select a product —</option>';
     foreach ($products as $prod) {
         echo '<option value="' . (int) $prod['id'] . '">#' . (int) $prod['id'] . ' ' . htmlspecialchars($prod['name']) . '</option>';
     }
     echo '</select> ';
-    echo '<input type="number" name="billing_cycle_months" class="form-control" value="1" min="1" style="width:90px"> ';
-    echo '<label><input type="checkbox" name="enabled" checked> Enabled</label> ';
     echo '<button class="btn btn-success">Add Product</button>';
     echo '</form>';
 }

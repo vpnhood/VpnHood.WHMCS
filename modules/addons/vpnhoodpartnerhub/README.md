@@ -41,9 +41,10 @@ provisioning (the existing `vpnhoodstore` / `Helper` / `ApiService` do that).
    - **IP Allowlist** — optional, comma-separated.
 2. On save you are shown the **API Key** and **API Secret** (the secret is shown once).
    Give these to the partner.
-3. Under the partner, add **Allowed Products**: map a **Downstream Ref** (the string the
-   partner uses, e.g. `vpn-monthly`) to one of **your** `vpnhoodstore` products and a
-   billing cycle. The partner can only order products in this list.
+3. Under the partner, add **Allowed Products**: pick one of **your** `vpnhoodstore`
+   products from the dropdown and click **Add Product**. The partner can only order
+   products in this list. The billing cycle is derived automatically from the product's
+   own pricing, and the product's WHMCS id is used as its `downstreamRef` in the API.
 
 Each partner order creates a **recurring service** on the partner's client account, so
 WHMCS invoices and charges their credit every cycle automatically.
@@ -72,6 +73,9 @@ Body: `{ "action": "<action>", ...params }`. Response:
 | `getBalance` | — | `{ clientId, balance, currency }` |
 | `getProducts` | — | `{ products: [{ downstreamRef, name, billingCycleMonths }] }` |
 | `order` | `downstreamRef`, `quantity?`, `customerReference?` | `{ keys: [{ upstreamServiceId, orderId, deliveryType, accessCode|csv }] }` |
+
+> `downstreamRef` is the WHMCS product id (as a string). Partners should call `getProducts`
+> to discover the available refs rather than hard-coding them.
 | `renew` | `upstreamServiceId`, `nextDueDate?` | `{ status, nextDueDate }` |
 | `suspend` | `upstreamServiceId` | `{ status }` |
 | `unsuspend` | `upstreamServiceId` | `{ status }` |
@@ -85,7 +89,7 @@ Body: `{ "action": "<action>", ...params }`. Response:
 curl -X POST https://store.example.com/modules/addons/vpnhoodpartnerhub/api.php \
   -H "X-Vpnhood-Key: $KEY" -H "X-Vpnhood-Secret: $SECRET" \
   -H "Content-Type: application/json" \
-  -d '{"action":"order","downstreamRef":"vpn-monthly","customerReference":"ABC123"}'
+  -d '{"action":"order","downstreamRef":"42","customerReference":"ABC123"}'
 ```
 
 ## Safety model

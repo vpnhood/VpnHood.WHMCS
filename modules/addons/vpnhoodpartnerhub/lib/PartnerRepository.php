@@ -92,6 +92,14 @@ class PartnerRepository
         ]);
     }
 
+    /** Delete a partner and all of its product mappings and logs. */
+    public function deletePartner(int $id): void
+    {
+        Capsule::table('mod_vpnhood_partner_products')->where('partner_id', $id)->delete();
+        Capsule::table('mod_vpnhood_partner_log')->where('partner_id', $id)->delete();
+        Capsule::table('mod_vpnhood_partners')->where('id', $id)->delete();
+    }
+
     public function regenerateSecret(int $id): string
     {
         $secret = $this->generateKey(48);
@@ -127,6 +135,79 @@ class PartnerRepository
         return $row ? (array) $row : null;
     }
 
+    /** Whether this partner already has the given product mapped. */
+    public function productMappingExists(int $partnerId, int $productId): bool
+    {
+        return Capsule::table('mod_vpnhood_partner_products')
+            ->where('partner_id', $partnerId)
+            ->where('whmcs_product_id', $productId)
+            ->exists();
+    }
+
+    /**
+     * Recurring billing cycles, in ascending length. Keyed by the tblpricing column;
+     * a cycle is "enabled" for a product when that column is >= 0 (WHMCS stores -1
+     * for a disabled cycle).
+     */
+    private function cycleDefinitions(): array
+    {
+        return [
+            'monthly'      => ['months' => 1,  'label' => 'Monthly'],
+            'quarterly'    => ['months' => 3,  'label' => 'Quarterly'],
+            'semiannually' => ['months' => 6,  'label' => 'Semi-Annually'],
+            'annually'     => ['months' => 12, 'label' => 'Annually'],
+            'biennially'   => ['months' => 24, 'label' => 'Biennially'],
+            'triennially'  => ['months' => 36, 'label' => 'Triennially'],
+        ];
+    }
+
+    /** Default-currency pricing row for a product, or null. */
+    private function productPricing(int $productId): ?object
+    {
+        return Capsule::table('tblpricing')
+            ->where('type', 'product')
+            ->where('relid', $productId)
+            ->orderBy('currency')
+            ->first();
+    }
+
+    /**
+     * Derive a product's billing cycle (in months) from its WHMCS pricing.
+     * Picks the shortest enabled recurring cycle, falling back to monthly.
+     */
+    public function productBillingCycleMonths(int $productId): int
+    {
+        $pricing = $this->productPricing($productId);
+        if ($pricing) {
+            foreach ($this->cycleDefinitions() as $column => $def) {
+                if (isset($pricing->$column) && (float) $pricing->$column >= 0) {
+                    return $def['months'];
+                }
+            }
+        }
+
+        return 1;
+    }
+
+    /**
+     * Human-readable labels of every recurring cycle enabled on a product
+     * (e.g. ['Monthly', 'Annually']).
+     */
+    public function productAvailableCycles(int $productId): array
+    {
+        $pricing = $this->productPricing($productId);
+        $labels = [];
+        if ($pricing) {
+            foreach ($this->cycleDefinitions() as $column => $def) {
+                if (isset($pricing->$column) && (float) $pricing->$column >= 0) {
+                    $labels[] = $def['label'];
+                }
+            }
+        }
+
+        return $labels;
+    }
+
     public function addProductMapping(int $partnerId, array $data): void
     {
         Capsule::table('mod_vpnhood_partner_products')->insert([
@@ -147,6 +228,47 @@ class PartnerRepository
     {
         $rows = Capsule::table('tblproducts')->orderBy('name')->get(['id', 'name']);
         return array_map(fn($r) => (array) $r, $rows->all());
+    }
+
+    /** All WHMCS clients, with a display label for the partner picker. */
+    public function whmcsClients(): array
+    {
+        $rows = Capsule::table('tblclients')
+            ->orderBy('companyname')
+            ->orderBy('firstname')
+            ->get(['id', 'firstname', 'lastname', 'companyname', 'email']);
+
+        return array_map(function ($r) {
+            $r = (array) $r;
+            $name = $this->composeClientName($r['companyname'], $r['firstname'], $r['lastname'], $r['email']);
+            $r['label'] = '#' . $r['id'] . ' ' . $name . ' <' . $r['email'] . '>';
+            $r['display_name'] = $name;
+            return $r;
+        }, $rows->all());
+    }
+
+    /** Human-readable name for a client, used as the partner's name. */
+    public function clientDisplayName(int $clientId): string
+    {
+        $c = Capsule::table('tblclients')->where('id', $clientId)->first();
+        if (!$c) {
+            return 'Client #' . $clientId;
+        }
+        return $this->composeClientName($c->companyname, $c->firstname, $c->lastname, $c->email);
+    }
+
+    /** Prefer company name, then full name, then email, then a client-id fallback. */
+    private function composeClientName(?string $company, ?string $first, ?string $last, ?string $email): string
+    {
+        $company = trim((string) $company);
+        if ($company !== '') {
+            return $company;
+        }
+        $full = trim(trim((string) $first) . ' ' . trim((string) $last));
+        if ($full !== '') {
+            return $full;
+        }
+        return trim((string) $email) !== '' ? trim((string) $email) : '(no name)';
     }
 
     // -- Native WHMCS credit ------------------------------------------------

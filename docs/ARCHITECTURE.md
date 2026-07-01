@@ -78,6 +78,11 @@ mod_vpnhood_partner_products
   billing_cycle_months, enabled
   UNIQUE(partner_id, downstream_ref)
 
+  The admin UI adds a mapping from just a product picker: downstream_ref is set to the
+  whmcs_product_id (as a string), billing_cycle_months is derived from the product's
+  pricing (PartnerRepository::productBillingCycleMonths), and enabled defaults to 1.
+  The columns remain in the schema/API for forward compatibility.
+
 mod_vpnhood_partner_log
   id, partner_id, action, remote_ip, http_status, request, response, created_at
 ```
