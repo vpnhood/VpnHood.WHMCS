@@ -83,6 +83,9 @@ class PartnerApiController
                 'downstreamRef'      => $m['downstream_ref'],
                 'name'               => $m['product_name'],
                 'billingCycleMonths' => (int) $m['billing_cycle_months'],
+                // Every recurring cycle the upstream product offers, so the connector
+                // can list them and reject a customer cycle the product doesn't support.
+                'availableCycles'    => $this->repo->productAvailableCycleMonths((int) $m['whmcs_product_id']),
             ];
         }
         return ['products' => $products];
@@ -133,7 +136,7 @@ class PartnerApiController
             throw new ApiException("Product '{$downstreamRef}' is not available to this partner.", 403);
         }
 
-        $billingCycle = $this->billingCycleName((int) $mapping['billing_cycle_months']);
+        $billingCycle = $this->resolveBillingCycle($mapping, (string) ($body['billingCycle'] ?? ''));
         $keys = [];
 
         // One key per unit. Each unit is its own WHMCS order/service, paid from credit.
@@ -411,6 +414,48 @@ class PartnerApiController
             return localAPI($action, $params);
         } catch (\Throwable $e) {
             return ['result' => 'exception', 'message' => $e->getMessage()];
+        }
+    }
+
+    /**
+     * Decide which WHMCS billing cycle to order.
+     *
+     * Falls back to the mapping's default cycle when the connector sends none. When a
+     * cycle IS requested, it must be one the upstream product actually offers, otherwise
+     * we reject the order (purchase-time enforcement of the cycle contract).
+     *
+     * @throws ApiException
+     */
+    private function resolveBillingCycle(array $mapping, string $requested): string
+    {
+        $default = $this->billingCycleName((int) $mapping['billing_cycle_months']);
+        $requested = strtolower(trim($requested));
+        if ($requested === '' || $requested === $default) {
+            return $default;
+        }
+
+        $requestedMonths = $this->cycleNameToMonths($requested);
+        $available = $this->repo->productAvailableCycleMonths((int) $mapping['whmcs_product_id']);
+        if ($requestedMonths === 0 || !in_array($requestedMonths, $available, true)) {
+            throw new ApiException(
+                "Billing cycle '{$requested}' is not available for product '{$mapping['downstream_ref']}'.",
+                422
+            );
+        }
+
+        return $requested;
+    }
+
+    private function cycleNameToMonths(string $name): int
+    {
+        switch (strtolower($name)) {
+            case 'monthly':      return 1;
+            case 'quarterly':    return 3;
+            case 'semiannually': return 6;
+            case 'annually':     return 12;
+            case 'biennially':   return 24;
+            case 'triennially':  return 36;
+            default:             return 0;
         }
     }
 

@@ -71,11 +71,17 @@ Body: `{ "action": "<action>", ...params }`. Response:
 | Action | Params | Returns |
 |--------|--------|---------|
 | `getBalance` | — | `{ clientId, balance, currency }` |
-| `getProducts` | — | `{ products: [{ downstreamRef, name, billingCycleMonths }] }` |
-| `order` | `downstreamRef`, `quantity?`, `customerReference?` | `{ keys: [{ upstreamServiceId, orderId, deliveryType, accessCode|csv }] }` |
+| `getProducts` | — | `{ products: [{ downstreamRef, name, billingCycleMonths, availableCycles }] }` |
+| `order` | `downstreamRef`, `billingCycle?`, `quantity?`, `customerReference?` | `{ keys: [{ upstreamServiceId, orderId, deliveryType, accessCode|csv }] }` |
 
 > `downstreamRef` is the WHMCS product id (as a string). Partners should call `getProducts`
-> to discover the available refs rather than hard-coding them.
+> to discover the available refs rather than hard-coding them. `availableCycles` lists the
+> recurring cycle lengths in months (e.g. `[1, 12]`) that the product offers.
+>
+> `billingCycle` (optional) is a WHMCS cycle name — `monthly`, `quarterly`, `semiannually`,
+> `annually`, `biennially`, `triennially`. When omitted, the product's default mapped cycle is
+> used. When provided, it must correspond to one of the product's `availableCycles`, otherwise
+> the order is rejected with HTTP 422.
 | `renew` | `upstreamServiceId`, `nextDueDate?` | `{ status, nextDueDate }` |
 | `suspend` | `upstreamServiceId` | `{ status }` |
 | `unsuspend` | `upstreamServiceId` | `{ status }` |
