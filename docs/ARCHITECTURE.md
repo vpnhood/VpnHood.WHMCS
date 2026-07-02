@@ -93,7 +93,10 @@ mod_vpnhood_partner_log
 ## Request lifecycle — `order` action
 
 1. `api.php` authenticates the partner (key/secret → status → IP allowlist).
-2. `PartnerApiController::order` resolves `downstreamRef` → mapped, enabled product.
+2. `PartnerApiController::order` resolves `downstreamRef` → mapped, enabled product, then
+   `resolveBillingCycle` picks the cycle: the connector's requested `billingCycle` when it is
+   one of the product's available cycles, else the mapping's default (an unsupported requested
+   cycle is rejected with `422`).
 3. For each unit: `placeSingleOrder`:
    1. `localAPI('AddOrder')` — creates order + invoice; WHMCS auto-applies the client's
       credit to the invoice.

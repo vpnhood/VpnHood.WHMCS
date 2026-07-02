@@ -208,6 +208,26 @@ class PartnerRepository
         return $labels;
     }
 
+    /**
+     * Billing cycle lengths (in months) of every recurring cycle enabled on a
+     * product (e.g. [1, 12]). Used by the partner API so the connector can validate
+     * the customer's chosen cycle against what the upstream product actually offers.
+     */
+    public function productAvailableCycleMonths(int $productId): array
+    {
+        $pricing = $this->productPricing($productId);
+        $months = [];
+        if ($pricing) {
+            foreach ($this->cycleDefinitions() as $column => $def) {
+                if (isset($pricing->$column) && (float) $pricing->$column >= 0) {
+                    $months[] = $def['months'];
+                }
+            }
+        }
+
+        return $months;
+    }
+
     public function addProductMapping(int $partnerId, array $data): void
     {
         Capsule::table('mod_vpnhood_partner_products')->insert([
