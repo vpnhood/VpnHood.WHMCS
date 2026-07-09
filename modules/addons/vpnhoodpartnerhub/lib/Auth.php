@@ -39,7 +39,12 @@ class Auth
         }
 
         $partner = $this->repo->getPartnerByApiKey($apiKey);
-        if ($partner === null || !password_verify($secret, $partner['api_secret_hash'])) {
+
+        // Always run password_verify against a real hash — even for an unknown key — so the
+        // response time does not reveal whether an API key exists (timing enumeration).
+        $hash = $partner['api_secret_hash'] ?? self::dummyHash();
+        $secretValid = password_verify($secret, $hash);
+        if ($partner === null || !$secretValid) {
             throw new ApiException('Invalid API credentials.', 401);
         }
 
@@ -50,6 +55,19 @@ class Auth
         $this->enforceIpAllowlist($partner, $remoteIp);
 
         return $partner;
+    }
+
+    /**
+     * A valid bcrypt hash to verify against when the API key is unknown, so an unknown-key
+     * request costs the same as a wrong-secret request. Computed once per request.
+     */
+    private static function dummyHash(): string
+    {
+        static $hash;
+        if ($hash === null) {
+            $hash = password_hash('vpnhood-invalid-secret', PASSWORD_DEFAULT);
+        }
+        return $hash;
     }
 
     /**
