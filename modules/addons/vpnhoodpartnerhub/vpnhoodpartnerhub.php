@@ -144,6 +144,38 @@ function vpnhoodpartnerhub_deactivate(): array
 }
 
 /**
+ * Per-admin-session CSRF token for this addon's state-changing POST forms.
+ * Stored in the WHMCS admin session; compared in constant time on POST.
+ */
+function vpnhoodpartnerhub_csrfToken(): string
+{
+    if (empty($_SESSION['vpnhoodpartnerhub_csrf'])) {
+        $_SESSION['vpnhoodpartnerhub_csrf'] = bin2hex(random_bytes(32));
+    }
+    return (string) $_SESSION['vpnhoodpartnerhub_csrf'];
+}
+
+/** Hidden token field to embed in every POST form. */
+function vpnhoodpartnerhub_csrfField(): string
+{
+    return '<input type="hidden" name="token" value="' . htmlspecialchars(vpnhoodpartnerhub_csrfToken()) . '">';
+}
+
+/**
+ * Reject a POST whose CSRF token is missing or does not match the session token.
+ *
+ * @throws \RuntimeException
+ */
+function vpnhoodpartnerhub_assertCsrf(): void
+{
+    $token = $_POST['token'] ?? '';
+    if (!is_string($token) || $token === '' || empty($_SESSION['vpnhoodpartnerhub_csrf'])
+        || !hash_equals((string) $_SESSION['vpnhoodpartnerhub_csrf'], $token)) {
+        throw new \RuntimeException('Invalid or expired security token. Please reload the page and try again.');
+    }
+}
+
+/**
  * Admin area output: partner management UI.
  */
 function vpnhoodpartnerhub_output(array $vars): void
@@ -157,6 +189,7 @@ function vpnhoodpartnerhub_output(array $vars): void
     // -- Handle POST actions ------------------------------------------------
     if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         try {
+            vpnhoodpartnerhub_assertCsrf();
             $sub = $_POST['do'] ?? '';
             if ($sub === 'save') {
                 $partnerId = (int) ($_POST['id'] ?? 0);
@@ -269,6 +302,7 @@ function vpnhoodpartnerhub_renderList(PartnerRepository $repo, string $modulelin
             . '<td><a class="btn btn-sm btn-default" href="' . $modulelink . '&action=edit&id=' . (int) $p['id'] . '">Manage</a> '
             . '<form method="post" action="' . $modulelink . '" style="display:inline"'
             . ' onsubmit="return confirm(\'Delete this partner? Its product mappings and logs are removed. This cannot be undone.\');">'
+            . vpnhoodpartnerhub_csrfField()
             . '<input type="hidden" name="do" value="partner_delete">'
             . '<input type="hidden" name="id" value="' . (int) $p['id'] . '">'
             . '<button type="submit" class="btn btn-sm btn-danger">Delete</button></form></td>'
@@ -290,6 +324,7 @@ function vpnhoodpartnerhub_renderEditForm(PartnerRepository $repo, string $modul
     echo '<h3>' . ($isEdit ? 'Edit Partner' : 'New Partner') . '</h3>';
 
     echo '<form method="post" action="' . $modulelink . '">';
+    echo vpnhoodpartnerhub_csrfField();
     echo '<input type="hidden" name="do" value="save">';
     echo '<input type="hidden" name="id" value="' . ($isEdit ? (int) $partner['id'] : 0) . '">';
 
@@ -326,6 +361,7 @@ function vpnhoodpartnerhub_renderEditForm(PartnerRepository $repo, string $modul
     echo '<hr><h4>API Credentials</h4>';
     echo '<p>API Key: <code>' . htmlspecialchars($partner['api_key']) . '</code></p>';
     echo '<form method="post" action="' . $modulelink . '" onsubmit="return confirm(\'Regenerate the API secret? The current secret stops working immediately.\');">';
+    echo vpnhoodpartnerhub_csrfField();
     echo '<input type="hidden" name="do" value="regen"><input type="hidden" name="id" value="' . (int) $partner['id'] . '">';
     echo '<button type="submit" class="btn btn-warning btn-sm">Regenerate Secret</button>';
     echo '</form>';
@@ -345,6 +381,7 @@ function vpnhoodpartnerhub_renderEditForm(PartnerRepository $repo, string $modul
             . '<td>#' . (int) $m['whmcs_product_id'] . ' ' . htmlspecialchars($m['product_name']) . '</td>'
             . '<td>' . htmlspecialchars($cyclesText) . '</td>'
             . '<td><form method="post" action="' . $modulelink . '" style="margin:0">'
+            . vpnhoodpartnerhub_csrfField()
             . '<input type="hidden" name="do" value="product_delete">'
             . '<input type="hidden" name="partner_id" value="' . (int) $partner['id'] . '">'
             . '<input type="hidden" name="mapping_id" value="' . (int) $m['id'] . '">'
@@ -356,6 +393,7 @@ function vpnhoodpartnerhub_renderEditForm(PartnerRepository $repo, string $modul
     // Add mapping form: pick a product; its billing cycle is derived automatically.
     $products = $repo->whmcsProducts();
     echo '<form method="post" action="' . $modulelink . '" class="form-inline">';
+    echo vpnhoodpartnerhub_csrfField();
     echo '<input type="hidden" name="do" value="product_add"><input type="hidden" name="partner_id" value="' . (int) $partner['id'] . '">';
     echo '<select name="whmcs_product_id" class="form-control" required>';
     echo '<option value="">— Select a product —</option>';

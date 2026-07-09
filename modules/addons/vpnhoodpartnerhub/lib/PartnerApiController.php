@@ -27,6 +27,9 @@ use WHMCS\Module\Server\VpnHoodStore\Helper;
  */
 class PartnerApiController
 {
+    /** Upper bound on units per order, to prevent resource-exhaustion via a huge quantity. */
+    private const MAX_ORDER_QUANTITY = 100;
+
     private PartnerRepository $repo;
     private array $partner;
 
@@ -128,7 +131,10 @@ class PartnerApiController
     private function order(array $body): array
     {
         $downstreamRef = (string) ($body['downstreamRef'] ?? '');
-        $quantity = max(1, (int) ($body['quantity'] ?? 1));
+        $quantity = (int) ($body['quantity'] ?? 1);
+        if ($quantity < 1 || $quantity > self::MAX_ORDER_QUANTITY) {
+            throw new ApiException('quantity must be between 1 and ' . self::MAX_ORDER_QUANTITY . '.', 422);
+        }
         $customerReference = (string) ($body['customerReference'] ?? '');
 
         $mapping = $this->repo->resolveProduct((int) $this->partner['id'], $downstreamRef);
