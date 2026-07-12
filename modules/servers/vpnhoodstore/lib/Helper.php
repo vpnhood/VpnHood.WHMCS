@@ -5,6 +5,8 @@ use WHMCS\Module\Server\VpnHoodStore\ApiService;
 
 class Helper {
 
+    public const string DEFAULT_ACCESS_TOKEN_GROUP = 'None';
+
     /*** Create Access Token and save its ID to the service properties ***/
     public static function createAccessToken(array $params, array $createParams): void {
         $apiService = new ApiService();
