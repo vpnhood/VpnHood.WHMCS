@@ -43,7 +43,7 @@ function vpnhoodstore_ConfigOptions(): array {
 
         // Build options array from access token groups.
         $accessTokenGroupOptions = [];
-        $accessTokenGroupOptions[0] = 'None'; // Add a default option for "None"
+        $accessTokenGroupOptions[0] = Helper::DEFAULT_ACCESS_TOKEN_GROUP; // Add a default option for "None"
         foreach ($accessTokenGroups as $item) {
             $accessTokenGroupOptions[$item->accessTokenGroupId] = $item->accessTokenGroupName;
         }
@@ -102,16 +102,21 @@ function vpnhoodstore_ConfigOptions(): array {
 function vpnhoodstore_CreateAccount(array $params): string {
     try {
         $isNormalTokenDelivery = $params['configoption4'] == 0; //0 is normal and 1 is CSV for reseller
+        $accessTokenGroupId = $params['configoption5'] === Helper::DEFAULT_ACCESS_TOKEN_GROUP ? null : $params['configoption5']; //Only set group id for CSV (Reseller)
+        $count = (int)$params['qty'] ?? 1; //Quantity > 1 = CSV delivery in the client are.
+
+        $isOneTimeProduct = $params['model']->product->paytype === "One Time"; //Check if the product is one time payment
+        $expirationTime = $isOneTimeProduct ? null : $params['model']['nextduedate']; //Set expiration time for recurring products only
 
         // Access Token create params
         $createParams = [
             'accessTokenProfileId' => $params['configoption3'],
             'serverFarmId'         => $params['configoption1'],
-            'accessTokenGroupId'   => $isNormalTokenDelivery ? null : $params['configoption5'], //Only set group id for CSV (Reseller)
+            'accessTokenGroupId'   => $accessTokenGroupId,
             'accessTokenName'      => $params['configoption2'],
-            'count'                => $isNormalTokenDelivery ? 1 : (int)$params['qty'], //Only set quantity for CSV (Reseller)
+            'count'                => $count,
             'customerId'           => (string)$params['userid'],
-            'expirationTime'       => $isNormalTokenDelivery ? $params['model']['nextduedate'] : null, //Do not set expiration time for CSV (Reseller)
+            'expirationTime'       => $expirationTime,
             'orderId'              => (string)$params['model']['orderid'],
             'shopId'               => 'WHMCS'
         ];
