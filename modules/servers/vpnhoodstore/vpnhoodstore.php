@@ -10,6 +10,7 @@ if (!defined("WHMCS")) {
 require_once __DIR__ . '/lib/Helper.php';
 require_once __DIR__ . '/lib/ApiService.php';
 
+use WHMCS\Database\Capsule;
 use WHMCS\Module\Server\VpnHoodStore\ApiService;
 use WHMCS\Module\Server\VpnHoodStore\Helper;
 
@@ -22,7 +23,7 @@ function vpnhoodstore_MetaData(): array {
 }
 
 /*** Fetch the access code options from the API for product settings in the admin area. ***/
-function vpnhoodstore_ConfigOptions(): array {
+function vpnhoodstore_ConfigOptions(array $params = []): array {
     try {
         $apiService = new ApiService();
         $serverFarms = $apiService->getServerFarms();
@@ -48,8 +49,9 @@ function vpnhoodstore_ConfigOptions(): array {
             $accessTokenGroupOptions[$item->accessTokenGroupId] = $item->accessTokenGroupName;
         }
 
-        // Build options array for token delivery methods.
-        $tokenDeliveryMethods = ["Normal", "CSV"];
+        // Reseller (Scaling Service) heads-up, folded into a real field's description so it
+        // renders reliably (a separate 'none' field is not always shown by WHMCS).
+        $scalingNotice = vpnhoodstore_scalingServiceNotice($params);
 
         return [
             "serverFarmId" => [
@@ -71,18 +73,11 @@ function vpnhoodstore_ConfigOptions(): array {
                 "Options" => $accessTokenProfileOptions,
                 "Default" => "",
             ],
-            "tokenDelivery" => [
-                "FriendlyName" => "Token Delivery Method",
-                "Type" => "dropdown",
-                "Options" => $tokenDeliveryMethods,
-                "Description" => "The CSV is for the resellers and returns a download link in the client area.",
-                "Default" => "Normal",
-            ],
             "accessTokenGroupsId" => [
                 "FriendlyName" => "Access Token Groups",
                 "Type" => "dropdown",
                 "Options" => $accessTokenGroupOptions,
-                "Description" => "Only work if Token Delivery Method is CSV.",
+                "Description" => "Optional (If this product is for resellers only, it is better to select the Reseller option so that it can be separated in the Manager panel.)" . $scalingNotice,
                 "Default" => "",
             ],
         ];
@@ -99,13 +94,41 @@ function vpnhoodstore_ConfigOptions(): array {
     }
 }
 
+/** Render a Bootstrap alert box for a product-config notice. */
+function vpnhoodstore_configAlert(string $level, string $html): string {
+    return "<div class='alert alert-{$level}' style='margin-top:8px;margin-bottom:0;'>" . $html . '</div>';
+}
+
+/**
+ * Config-time notice shown on the product edit page when "Allow Multiple Quantities" is set to
+ * Scaling Service (allowqty = 2) — the reseller / CSV bulk-delivery mode.
+ *
+ * WHMCS does not reliably pass 'pid' into _ConfigOptions on the product edit page; the product
+ * id is in the request there (configproducts.php?action=edit&id=X).
+ */
+function vpnhoodstore_scalingServiceNotice(array $params): string {
+    $pid = (int) ($params['pid'] ?? ($_REQUEST['id'] ?? 0));
+    if ($pid <= 0) {
+        return '';
+    }
+
+    $allowQty = (int) Capsule::table('tblproducts')->where('id', $pid)->value('allowqty');
+    if ($allowQty !== 2) { // 2 = Scaling Service
+        return '';
+    }
+
+    return vpnhoodstore_configAlert(
+        'danger',
+        'Note: You have selected "Allow Multiple Quantities" as "Scaling Service" in the Pricing tab; this option is for resellers.'
+    );
+}
+
 function vpnhoodstore_CreateAccount(array $params): string {
     try {
-        $isNormalTokenDelivery = $params['configoption4'] == 0; //0 is normal and 1 is CSV for reseller
-        $accessTokenGroupId = $params['configoption5'] === Helper::DEFAULT_ACCESS_TOKEN_GROUP ? null : $params['configoption5']; //Only set group id for CSV (Reseller)
-        $count = (int)$params['qty'] ?? 1; //Quantity > 1 = CSV delivery in the client are.
+        $accessTokenGroupId = (int)$params['configoption4'] === 0 ? null : $params['configoption4']; // "None" is key 0 (falsy) -> no group
+        $count = (int)($params['qty']);
 
-        $isOneTimeProduct = $params['model']->product->paytype === "One Time"; //Check if the product is one time payment
+        $isOneTimeProduct = $params['model']->product->paytype === "onetime"; //Check if the product is one time payment
         $expirationTime = $isOneTimeProduct ? null : $params['model']['nextduedate']; //Set expiration time for recurring products only
 
         // Access Token create params
@@ -121,16 +144,16 @@ function vpnhoodstore_CreateAccount(array $params): string {
             'shopId'               => 'WHMCS'
         ];
 
-        if ($isNormalTokenDelivery)
-            Helper::createAccessToken($params, $createParams);
-        else
+        if (Helper::isCsvTokenDelivery($params))
             Helper::createAccessTokenList($createParams);
+        else
+            Helper::createAccessToken($params, $createParams);
 
         return 'success';
     }
     catch (Exception $e) {
         // Record the error in WHMCS's module log.
-        logModuleCall('vpnhoodstore', __FUNCTION__, $params, $e->getMessage(), $e->getTraceAsString());
+        logModuleCall('vpnhoodstore', __FUNCTION__, $e->getMessage(), $e->getTraceAsString());
         return "VpnHoodStore Provisioning Failed: " . $e->getMessage();
     }
 }
@@ -152,14 +175,14 @@ function vpnhoodstore_TerminateAccount(array $params): string{
 }
 
 function vpnhoodstore_ClientArea(array $params): array {
-    $isNormalTokenDelivery = $params['configoption4'] == 0; //0 is normal and 1 is CSV for reseller
+    $isNormalTokenDelivery = !Helper::isCsvTokenDelivery($params);
 
     // Fetch the access code from the API through the AJAX request.
     if (isset($_SERVER['HTTP_X_REQUESTED_WITH']) && $_SERVER['HTTP_X_REQUESTED_WITH'] === 'XMLHttpRequest') {
         try {
 
             // Returns Access Code as Normal Token Delivery in the client area
-            if ($isNormalTokenDelivery){
+            if ($isNormalTokenDelivery) {
                $accessTokenId = $params['model']->serviceProperties->get('accessTokenId');
                 Helper::getAccessCode($accessTokenId);
             }
