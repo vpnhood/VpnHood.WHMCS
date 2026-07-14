@@ -107,4 +107,10 @@ class Helper {
 
         echo $response;
     }
+
+    public static function isCsvTokenDelivery(array $params): bool {
+        $count = (int)($params['qty']);
+        $allowQty = (int) $params['model']->product->allowqty; // 0 = No, 1 = Multiple Services, 2 = Scaling Service
+        return $count > 1 && $allowQty === 2;
+    }
 }
