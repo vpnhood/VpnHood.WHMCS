@@ -22,7 +22,9 @@ provisioning (the existing `vpnhoodstore` / `Helper` / `ApiService` do that).
 1. Copy `modules/addons/vpnhoodpartnerhub/` into your WHMCS `/modules/addons/`.
 2. **System Settings → Addon Modules → VpnHood! Partner Hub → Activate**. Activation
    creates the tables `mod_vpnhood_partners`, `mod_vpnhood_partner_products`,
-   `mod_vpnhood_partner_log`.
+   `mod_vpnhood_partner_log`. **Deactivating preserves all data** (partners keep their API
+   credentials across a deactivate/reactivate); to remove the module's data permanently,
+   drop those tables manually.
 3. Configure the addon: toggle **Require IP Allowlist**, set a reference currency for the
    admin balance display, and set **Order Payment Gateway** to the system name of an active
    gateway (e.g. `banktransfer`). The gateway only labels the partner order invoices — they
@@ -71,17 +73,25 @@ Body: `{ "action": "<action>", ...params }`. Response:
 | Action | Params | Returns |
 |--------|--------|---------|
 | `getBalance` | — | `{ clientId, balance, currency }` |
-| `getProducts` | — | `{ products: [{ downstreamRef, name, billingCycleMonths, availableCycles }] }` |
+| `getProducts` | — | `{ products: [{ downstreamRef, name, paymentType, allowMultipleQuantities, billingCycleMonths, availableCycles }] }` |
 | `order` | `downstreamRef`, `billingCycle?`, `quantity?`, `customerReference?` | `{ keys: [{ upstreamServiceId, orderId, deliveryType, accessCode|csv }] }` |
 
 > `downstreamRef` is the WHMCS product id (as a string). Partners should call `getProducts`
-> to discover the available refs rather than hard-coding them. `availableCycles` lists the
-> recurring cycle lengths in months (e.g. `[1, 12]`) that the product offers.
+> to discover the available refs rather than hard-coding them. `paymentType` is the product's
+> WHMCS Payment Type — `free`, `onetime`, or `recurring` — so the connector can flag a
+> partner-side product whose Payment Type does not match. `availableCycles` lists the
+> recurring cycle lengths in months (e.g. `[1, 12]`) that the product offers (only meaningful
+> when `paymentType` is `recurring`).
 >
 > `billingCycle` (optional) is a WHMCS cycle name — `monthly`, `quarterly`, `semiannually`,
 > `annually`, `biennially`, `triennially`. When omitted, the product's default mapped cycle is
 > used. When provided, it must correspond to one of the product's `availableCycles`, otherwise
-> the order is rejected with HTTP 422.
+> the order is rejected with HTTP 422. For `onetime`/`free` products `billingCycle` is ignored
+> (WHMCS reports such services' cycle as "One Time", which is not a cycle name) and the order
+> is placed as `onetime`.
+>
+> `quantity` above 1 is rejected with HTTP 422 unless the product has **Allow Multiple
+> Quantities** enabled on its Pricing tab (`allowMultipleQuantities` in `getProducts`).
 | `renew` | `upstreamServiceId`, `nextDueDate?` | `{ status, nextDueDate }` |
 | `suspend` | `upstreamServiceId` | `{ status }` |
 | `unsuspend` | `upstreamServiceId` | `{ status }` |
