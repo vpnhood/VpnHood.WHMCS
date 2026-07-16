@@ -85,6 +85,14 @@ class PartnerApiController
             $products[] = [
                 'downstreamRef'      => $m['downstream_ref'],
                 'name'               => $m['product_name'],
+                // WHMCS "Payment Type" (free|onetime|recurring). The connector compares it
+                // against the partner-side product so a mismatched type is caught at config
+                // time; billing cycles only apply when this is 'recurring'.
+                'paymentType'        => $this->normalizePaymentType($m['payment_type'] ?? ''),
+                // Whether this product may be ordered with quantity > 1 in a single call
+                // ("Allow Multiple Quantities" on the Pricing tab). The connector compares
+                // it against the partner-side product so a mismatch is caught at config time.
+                'allowMultipleQuantities' => (bool) ($m['allow_qty'] ?? false),
                 'billingCycleMonths' => (int) $m['billing_cycle_months'],
                 // Every recurring cycle the upstream product offers, so the connector
                 // can list them and reject a customer cycle the product doesn't support.
@@ -140,6 +148,15 @@ class PartnerApiController
         $mapping = $this->repo->resolveProduct((int) $this->partner['id'], $downstreamRef);
         if ($mapping === null) {
             throw new ApiException("Product '{$downstreamRef}' is not available to this partner.", 403);
+        }
+
+        // Purchase-time enforcement of "Allow Multiple Quantities": bulk orders are only
+        // accepted when the upstream product explicitly allows them on its Pricing tab.
+        if ($quantity > 1 && !$this->repo->productAllowsMultipleQuantities((int) $mapping['whmcs_product_id'])) {
+            throw new ApiException(
+                "Product '{$downstreamRef}' does not allow multiple quantities; order quantity must be 1.",
+                422
+            );
         }
 
         $billingCycle = $this->resolveBillingCycle($mapping, (string) ($body['billingCycle'] ?? ''));
@@ -434,6 +451,13 @@ class PartnerApiController
      */
     private function resolveBillingCycle(array $mapping, string $requested): string
     {
+        // One-time/free products have no recurring cycle. WHMCS reports such a service's
+        // cycle as "One Time" (the connector relays it verbatim), which is not a cycle
+        // name — so skip cycle resolution entirely and place the order as 'onetime'.
+        if ($this->repo->productPaymentType((int) $mapping['whmcs_product_id']) !== 'recurring') {
+            return 'onetime';
+        }
+
         $default = $this->billingCycleName((int) $mapping['billing_cycle_months']);
         $requested = strtolower(trim($requested));
         if ($requested === '' || $requested === $default) {
@@ -450,6 +474,13 @@ class PartnerApiController
         }
 
         return $requested;
+    }
+
+    /** Normalize a WHMCS "Payment Type" to one of free|onetime|recurring (defaulting to recurring). */
+    private function normalizePaymentType($paytype): string
+    {
+        $paytype = strtolower(trim((string) $paytype));
+        return in_array($paytype, ['free', 'onetime', 'recurring'], true) ? $paytype : 'recurring';
     }
 
     private function cycleNameToMonths(string $name): int

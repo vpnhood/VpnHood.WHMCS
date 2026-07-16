@@ -117,7 +117,7 @@ class PartnerRepository
         $rows = Capsule::table('mod_vpnhood_partner_products as m')
             ->leftJoin('tblproducts as p', 'm.whmcs_product_id', '=', 'p.id')
             ->where('m.partner_id', $partnerId)
-            ->select('m.*', 'p.name as product_name')
+            ->select('m.*', 'p.name as product_name', 'p.paytype as payment_type', 'p.allowqty as allow_qty')
             ->orderBy('m.id')
             ->get();
 
@@ -228,6 +228,23 @@ class PartnerRepository
         return $months;
     }
 
+    /**
+     * WHMCS "Payment Type" (free|onetime|recurring) of a product. Billing cycles only
+     * exist for recurring products; one-time/free products store their price in the
+     * "monthly" pricing column, which must not be read as a real Monthly cycle.
+     */
+    public function productPaymentType(int $productId): string
+    {
+        $paytype = strtolower(trim((string) Capsule::table('tblproducts')->where('id', $productId)->value('paytype')));
+        return in_array($paytype, ['free', 'onetime', 'recurring'], true) ? $paytype : 'recurring';
+    }
+
+    /** Whether the product has "Allow Multiple Quantities" enabled on its Pricing tab. */
+    public function productAllowsMultipleQuantities(int $productId): bool
+    {
+        return (bool) Capsule::table('tblproducts')->where('id', $productId)->value('allowqty');
+    }
+
     public function addProductMapping(int $partnerId, array $data): void
     {
         Capsule::table('mod_vpnhood_partner_products')->insert([
@@ -246,7 +263,7 @@ class PartnerRepository
 
     public function whmcsProducts(): array
     {
-        $rows = Capsule::table('tblproducts')->orderBy('name')->get(['id', 'name']);
+        $rows = Capsule::table('tblproducts')->orderBy('name')->get(['id', 'name', 'paytype']);
         return array_map(fn($r) => (array) $r, $rows->all());
     }
 

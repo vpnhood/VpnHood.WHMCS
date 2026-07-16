@@ -121,26 +121,21 @@ function vpnhoodpartnerhub_activate(): array
 }
 
 /**
- * Drop database tables on deactivation.
+ * Deactivation preserves all data. Partners' API keys/secrets, product mappings and the
+ * audit log live only in these tables — dropping them here once silently destroyed every
+ * partner credential during a routine deactivate/reactivate, breaking all connectors
+ * (their stored API keys no longer matched anything). Reactivation is harmless: activate()
+ * only creates tables that do not exist. To remove the module's data permanently, drop the
+ * mod_vpnhood_partner_log / mod_vpnhood_partner_products / mod_vpnhood_partners tables
+ * manually after uninstalling.
  */
 function vpnhoodpartnerhub_deactivate(): array
 {
-    try {
-        $schema = Capsule::schema();
-        $schema->dropIfExists('mod_vpnhood_partner_log');
-        $schema->dropIfExists('mod_vpnhood_partner_products');
-        $schema->dropIfExists('mod_vpnhood_partners');
-
-        return [
-            'status'      => 'success',
-            'description' => 'VpnHood Partner Hub tables removed.',
-        ];
-    } catch (\Throwable $e) {
-        return [
-            'status'      => 'error',
-            'description' => 'Unable to drop tables: ' . $e->getMessage(),
-        ];
-    }
+    return [
+        'status'      => 'success',
+        'description' => 'VpnHood Partner Hub deactivated. Partner data and tables were preserved;'
+            . ' reactivating restores full operation with the same API credentials.',
+    ];
 }
 
 /**
@@ -370,16 +365,24 @@ function vpnhoodpartnerhub_renderEditForm(PartnerRepository $repo, string $modul
     echo '<hr><h4>Allowed Products</h4>';
     $mappings = $repo->getProductMappings($partnerId);
     echo '<table class="table table-condensed"><thead><tr>'
-        . '<th>Product</th><th>Available Cycles</th><th></th></tr></thead><tbody>';
+        . '<th>Product</th><th>Payment Type</th><th>Available Cycles</th><th>Multi Qty</th><th></th></tr></thead><tbody>';
     if (empty($mappings)) {
-        echo '<tr><td colspan="3" class="text-muted">No products mapped. Partner cannot order until at least one is added.</td></tr>';
+        echo '<tr><td colspan="5" class="text-muted">No products mapped. Partner cannot order until at least one is added.</td></tr>';
     }
     foreach ($mappings as $m) {
-        $cycles = $repo->productAvailableCycles((int) $m['whmcs_product_id']);
-        $cyclesText = $cycles ? implode(', ', $cycles) : '—';
+        $payType = $repo->productPaymentType((int) $m['whmcs_product_id']);
+        // Cycles only exist for recurring products; a one-time price lives in the
+        // "monthly" pricing column and must not render as a phantom Monthly cycle.
+        $cyclesText = '—';
+        if ($payType === 'recurring') {
+            $cycles = $repo->productAvailableCycles((int) $m['whmcs_product_id']);
+            $cyclesText = $cycles ? implode(', ', $cycles) : '—';
+        }
         echo '<tr>'
             . '<td>#' . (int) $m['whmcs_product_id'] . ' ' . htmlspecialchars($m['product_name']) . '</td>'
+            . '<td>' . htmlspecialchars(vpnhoodpartnerhub_payTypeLabel($payType)) . '</td>'
             . '<td>' . htmlspecialchars($cyclesText) . '</td>'
+            . '<td>' . ($repo->productAllowsMultipleQuantities((int) $m['whmcs_product_id']) ? 'Yes' : '—') . '</td>'
             . '<td><form method="post" action="' . $modulelink . '" style="margin:0">'
             . vpnhoodpartnerhub_csrfField()
             . '<input type="hidden" name="do" value="product_delete">'
@@ -398,9 +401,17 @@ function vpnhoodpartnerhub_renderEditForm(PartnerRepository $repo, string $modul
     echo '<select name="whmcs_product_id" class="form-control" required>';
     echo '<option value="">— Select a product —</option>';
     foreach ($products as $prod) {
-        echo '<option value="' . (int) $prod['id'] . '">#' . (int) $prod['id'] . ' ' . htmlspecialchars($prod['name']) . '</option>';
+        echo '<option value="' . (int) $prod['id'] . '">#' . (int) $prod['id'] . ' ' . htmlspecialchars($prod['name'])
+            . ' — ' . htmlspecialchars(vpnhoodpartnerhub_payTypeLabel((string) ($prod['paytype'] ?? ''))) . '</option>';
     }
     echo '</select> ';
     echo '<button class="btn btn-success">Add Product</button>';
     echo '</form>';
+}
+
+/** Human label for a WHMCS "Payment Type" (free|onetime|recurring). */
+function vpnhoodpartnerhub_payTypeLabel(string $paytype): string
+{
+    $labels = ['free' => 'Free', 'onetime' => 'One Time', 'recurring' => 'Recurring'];
+    return $labels[strtolower(trim($paytype))] ?? 'Recurring';
 }
