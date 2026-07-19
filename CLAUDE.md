@@ -34,6 +34,15 @@ when you change architecture, the DB schema, or the API.
 - **No build/lint/test tooling** is configured here (no PHP CLI in this environment). Verify
   on a live WHMCS — see the verification notes in `docs/ARCHITECTURE.md` and each README.
 
+## Dev server & credentials
+
+- Credentials live outside the repo in `..\..\.user\whmcs\` (i.e. `<Vh root>\.user\whmcs\`),
+  following the `.user/<host>/` convention: `ssh.openssh` (private key), `ssh.ppk`, `ssh.pub`.
+- Dev WHMCS for verification/testing: `ssh -i <Vh root>\.user\whmcs\ssh.openssh
+  whmcsdev@webhost-ftps.vpnhood.com`, web root
+  `/home/whmcsdev/web/whmcs-dev.vpnhood.com/public_html`, site `https://whmcs-dev.vpnhood.com`.
+- Integration tests: `tests/integration/` (needs a local, gitignored `.env`).
+
 ## Where things are
 
 - Retail provisioning: `modules/servers/vpnhoodstore/`
