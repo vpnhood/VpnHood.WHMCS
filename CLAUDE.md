@@ -34,14 +34,27 @@ when you change architecture, the DB schema, or the API.
 - **No build/lint/test tooling** is configured here (no PHP CLI in this environment). Verify
   on a live WHMCS — see the verification notes in `docs/ARCHITECTURE.md` and each README.
 
+## Production vs. dev/test layout
+
+Production code (what gets deployed to a WHMCS) lives ONLY under `modules/` and
+`includes/`. Everything for development and testing stays in its own folder — never
+mix test/dev files into the production tree:
+
+- `scripts/` — dev tooling. `scripts/deploy-dev.sh [hub|partner|all]` publishes the
+  modules to the dev WHMCS (staged upload + md5 verify + server-side `php -l` + API
+  smoke check). It deploys only `modules/` and `includes/hooks`, so test files can
+  never reach the server.
+- `tests/` — all tests (`tests/integration/` today; put future e2e/Playwright suites
+  under `tests/` too). Needs a local, gitignored `.env` for credentials.
+- `docs/` — developer docs.
+
 ## Dev server & credentials
 
-- Credentials live outside the repo in `..\..\.user\whmcs\` (i.e. `<Vh root>\.user\whmcs\`),
+- Credentials live outside the repo in `..\.user\whmcs\` (i.e. `<Vh root>\.user\whmcs\`),
   following the `.user/<host>/` convention: `ssh.openssh` (private key), `ssh.ppk`, `ssh.pub`.
 - Dev WHMCS for verification/testing: `ssh -i <Vh root>\.user\whmcs\ssh.openssh
   whmcsdev@webhost-ftps.vpnhood.com`, web root
   `/home/whmcsdev/web/whmcs-dev.vpnhood.com/public_html`, site `https://whmcs-dev.vpnhood.com`.
-- Integration tests: `tests/integration/` (needs a local, gitignored `.env`).
 
 ## Where things are
 
