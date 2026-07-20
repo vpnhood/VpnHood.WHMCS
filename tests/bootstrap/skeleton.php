@@ -216,6 +216,62 @@ foreach ($spec['clients'] as $role => $c) {
     }
 }
 
+// ------------------------------------------------------------------ hub addon
+// WHMCS addon activation = module listed in tblconfiguration.ActiveAddonModules
+// + its settings rows in tbladdonmodules (deactivation deletes the settings but
+// preserves the mod_* tables). Recreate the tables too in case they were dropped
+// — schema mirrors vpnhoodpartnerhub_activate(); keep them in sync.
+if (!empty($spec['hubAddon'])) {
+    $m = $spec['hubAddon']['module'];
+
+    $db->exec("CREATE TABLE IF NOT EXISTS mod_vpnhood_partners (
+        id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+        client_id INT UNSIGNED NOT NULL, INDEX (client_id),
+        name VARCHAR(255) NOT NULL,
+        api_key VARCHAR(64) NOT NULL UNIQUE,
+        api_secret_hash VARCHAR(255) NOT NULL,
+        status ENUM('active','suspended') NOT NULL DEFAULT 'active',
+        ip_allowlist TEXT NULL,
+        created_at TIMESTAMP NULL, updated_at TIMESTAMP NULL)");
+    $db->exec("CREATE TABLE IF NOT EXISTS mod_vpnhood_partner_products (
+        id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+        partner_id INT UNSIGNED NOT NULL, INDEX (partner_id),
+        downstream_ref VARCHAR(255) NOT NULL, INDEX (downstream_ref),
+        whmcs_product_id INT UNSIGNED NOT NULL,
+        billing_cycle_months INT UNSIGNED NOT NULL DEFAULT 1,
+        enabled TINYINT(1) NOT NULL DEFAULT 1,
+        UNIQUE KEY partner_ref (partner_id, downstream_ref))");
+    $db->exec("CREATE TABLE IF NOT EXISTS mod_vpnhood_partner_log (
+        id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+        partner_id INT UNSIGNED NULL, INDEX (partner_id),
+        action VARCHAR(64) NULL, remote_ip VARCHAR(64) NULL,
+        http_status INT UNSIGNED NULL, request TEXT NULL, response TEXT NULL,
+        created_at TIMESTAMP NULL)");
+
+    $act = one($db, "SELECT value FROM tblconfiguration WHERE setting='ActiveAddonModules'");
+    $list = array_filter(explode(',', $act['value'] ?? ''));
+    if (!in_array($m, $list, true)) {
+        $list[] = $m;
+        $db->prepare("UPDATE tblconfiguration SET value=? WHERE setting='ActiveAddonModules'")
+           ->execute([implode(',', $list)]);
+        $report['created'][] = "addon '$m' activated";
+    } else {
+        $report['existing'][] = "addon '$m' active";
+    }
+
+    foreach ($spec['hubAddon']['settings'] as $k => $v) {
+        $row = one($db, 'SELECT * FROM tbladdonmodules WHERE module=? AND setting=?', [$m, $k]);
+        if (!$row) {
+            insertRow($db, 'tbladdonmodules', ['module' => $m, 'setting' => $k, 'value' => $v]);
+            $report['created'][] = "addon setting $k = '$v'";
+        } elseif ((string)$row['value'] !== (string)$v) {
+            $db->prepare('UPDATE tbladdonmodules SET value=? WHERE module=? AND setting=?')
+               ->execute([$v, $m, $k]);
+            $report['updated'][] = "addon setting $k: '{$row['value']}' → '$v'";
+        }
+    }
+}
+
 // ---------------------------------------------------------------- hub partner
 $apiKey = getenv('PARTNER_API_KEY');
 $apiSecret = getenv('PARTNER_API_SECRET');

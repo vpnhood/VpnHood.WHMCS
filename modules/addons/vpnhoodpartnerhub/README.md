@@ -2,7 +2,7 @@
 
 Installed on **your** WHMCS (the same one that runs `vpnhoodstore`). It turns your
 WHMCS into a **wholesale gateway**: external partners who run their own storefront
-(using the **VpnHood Partner Connector** module) can order and provision VpnHood keys
+(using the **VpnHood! Partner Connector** module) can order and provision VpnHood keys
 against your WHMCS, paying from a **prepaid credit balance** they hold as a client on
 your system.
 
