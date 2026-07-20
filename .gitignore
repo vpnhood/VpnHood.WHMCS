@@ -5,3 +5,7 @@
 *.env
 !*.env.example
 /tests/integration/.env
+
+# Node (tests/e2e)
+node_modules/
+/tests/e2e/.artifacts/
