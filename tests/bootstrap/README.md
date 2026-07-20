@@ -17,8 +17,14 @@ What it ensures (spec: [fixtures.json](fixtures.json), applied server-side by
 | Product (onetime, $2.00) | **Reseller - One-Month Premium Code** (`reseller-one-month-premium-code`) |
 | Product (recurring, $2.00/mo) | **Reseller - One-Month Premium Code (Subscription)** (`…-subscription`) |
 | Reseller client | **`test-reseller@vpnhood.com`** ("Test Reseller") — credit topped up to **$500** |
-| Buyer client | **`test-buyer@vpnhood.com`** ("Test Buyer") — the reseller's end customer |
 | Hub partner | **Test Reseller**, linked to the reseller client, both products mapped (`downstream_ref` = product slug) |
+
+When `VpnHood.WHMCS.Partner` is checked out alongside this repo, the same run
+also applies its `tests/bootstrap/connector-fixtures.json` (connector install
+config pointed at this Hub, the partner-shop products, and the **buyer** client
+`test-buyer@vpnhood.com` — the buyer belongs to the connector side). Hub and
+connector share the one dev WHMCS; the connector reaches the Hub over HTTPS
+like any external partner would.
 
 Credentials live in `<Vh root>/.user/whmcs/secrets-dev.json` (`partnerApiKey`,
 `partnerApiSecret`, `testClientPassword` are generated on first run; `adminUser`
