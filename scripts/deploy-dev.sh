@@ -118,9 +118,13 @@ deploy_hub() {
 
 deploy_partner() {
   [ -d "$PARTNER_REPO" ] || { echo "Partner repo not found: $PARTNER_REPO" >&2; exit 1; }
-  deploy_dir "$PARTNER_REPO" modules/servers/vpnhoodpartner
-  verify_dir "$PARTNER_REPO" modules/servers/vpnhoodpartner
-  lint_dir modules/servers/vpnhoodpartner
+  local dirs=(modules/servers/vpnhoodpartner modules/addons/vpnhoodpartnerconfig)
+  local d
+  for d in "${dirs[@]}"; do
+    deploy_dir "$PARTNER_REPO" "$d"
+    verify_dir "$PARTNER_REPO" "$d"
+    lint_dir "$d"
+  done
 }
 
 echo "Deploying '$TARGET' to $SSH_HOST:$WEBROOT"
