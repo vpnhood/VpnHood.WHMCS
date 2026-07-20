@@ -44,8 +44,9 @@ mix test/dev files into the production tree:
   modules to the dev WHMCS (staged upload + md5 verify + server-side `php -l` + API
   smoke check). It deploys only `modules/` and `includes/hooks`, so test files can
   never reach the server.
-- `tests/` — all tests (`tests/integration/` today; put future e2e/Playwright suites
-  under `tests/` too). Needs a local, gitignored `.env` for credentials.
+- `tests/` — all tests. `tests/bootstrap/init-skeleton.sh` idempotently ensures the
+  dev-WHMCS fixtures (group, products, test clients, hub partner) — run it before any
+  test. `tests/integration/` = API tests; `tests/e2e/` = Playwright browser tooling.
 - `docs/` — developer docs.
 
 ## Dev server & credentials

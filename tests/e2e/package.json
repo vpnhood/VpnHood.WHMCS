@@ -1,0 +1,12 @@
+{
+  "name": "vpnhood-whmcs-e2e",
+  "private": true,
+  "type": "module",
+  "description": "Browser-driven admin/client-area checks for the VpnHood WHMCS modules (dev server).",
+  "scripts": {
+    "hub:configure": "node hub-admin-configure.mjs"
+  },
+  "dependencies": {
+    "playwright": "1.61.1"
+  }
+}
