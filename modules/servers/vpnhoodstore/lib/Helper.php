@@ -109,8 +109,19 @@ class Helper {
     }
 
     public static function isCsvTokenDelivery(array $params): bool {
-        $count = (int)($params['qty']);
-        $allowQty = (int) $params['model']->product->allowqty; // 0 = No, 1 = Multiple Services, 2 = Scaling Service
+        return self::isCsvTokenDeliveryFor(
+            (int)($params['qty']),
+            (int) $params['model']->product->allowqty
+        );
+    }
+
+    /**
+     * Single source of truth for the delivery mode: CSV (bulk) delivery applies only
+     * to Scaling Service products (allowqty 2) ordered with more than one unit.
+     * Also used by vpnhoodpartnerhub when reading back a provisioned key.
+     */
+    public static function isCsvTokenDeliveryFor(int $count, int $allowQty): bool {
+        // allowqty: 0 = No, 1 = Multiple Services, 2 = Scaling Service
         return $count > 1 && $allowQty === 2;
     }
 }

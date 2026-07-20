@@ -364,10 +364,14 @@ class PartnerApiController
     /** Whether a service's product uses Normal (single) token delivery. */
     private function isNormalDelivery(int $serviceId): bool
     {
-        // vpnhoodstore stores token delivery in product config option 4 (0=Normal, 1=CSV).
-        $packageId = Capsule::table('tblhosting')->where('id', $serviceId)->value('packageid');
-        $value = Capsule::table('tblproducts')->where('id', $packageId)->value('configoption4');
-        return (string) $value === '0' || $value === null || $value === '';
+        // Delivery mode is defined by vpnhoodstore's Helper::isCsvTokenDeliveryFor():
+        // CSV only for Scaling Service products (allowqty 2) with qty > 1. (An older
+        // revision misread product configoption4 here, but that option is the access
+        // token group id in the current vpnhoodstore config layout.)
+        $service = Capsule::table('tblhosting')->where('id', $serviceId)->first();
+        $allowQty = (int) Capsule::table('tblproducts')
+            ->where('id', $service->packageid ?? 0)->value('allowqty');
+        return !Helper::isCsvTokenDeliveryFor((int) ($service->qty ?? 1), $allowQty);
     }
 
     /** Read a stored service property (e.g. accessTokenId) via the WHMCS Service model. */

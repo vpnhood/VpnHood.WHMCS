@@ -50,12 +50,26 @@ PARTNER_API_SECRET="$(secret partnerApiSecret)"
 TEST_CLIENT_PASSWORD="$(secret testClientPassword)"
 
 echo "== Running skeleton on the dev box"
+# Connector fixtures live in the Partner repo (they are connector domain
+# knowledge); this engine applies them after the hub spec when the repo exists.
+CONNECTOR_FIXTURES="$VH_ROOT/VpnHood.WHMCS.Partner/tests/bootstrap/connector-fixtures.json"
+SPECS=(fixtures.json)
+UPLOADS=("$SCRIPT_DIR/skeleton.php" "$SCRIPT_DIR/fixtures.json")
+if [ -f "$CONNECTOR_FIXTURES" ]; then
+  SPECS+=(connector-fixtures.json)
+  UPLOADS+=("$CONNECTOR_FIXTURES")
+else
+  echo "   (connector fixtures not found — hub spec only)"
+fi
+
 "${SSH[@]}" 'mkdir -p ~/tmp'
-scp -i "$SSH_KEY" -q "$SCRIPT_DIR/skeleton.php" "$SCRIPT_DIR/fixtures.json" "$SSH_HOST":tmp/
+scp -i "$SSH_KEY" -q "${UPLOADS[@]}" "$SSH_HOST":tmp/
+REMOTE_SPECS=""; for s in "${SPECS[@]}"; do REMOTE_SPECS+=" ~/tmp/$s"; done
 "${SSH[@]}" "TEST_CLIENT_PASSWORD=$(printf %q "$TEST_CLIENT_PASSWORD") \
   PARTNER_API_KEY=$(printf %q "$PARTNER_API_KEY") \
   PARTNER_API_SECRET=$(printf %q "$PARTNER_API_SECRET") \
-  php ~/tmp/skeleton.php ~/tmp/fixtures.json; rc=\$?; rm -f ~/tmp/skeleton.php ~/tmp/fixtures.json; exit \$rc"
+  WHMCS_DEV_URL=$(printf %q "$SITE_URL") \
+  php ~/tmp/skeleton.php$REMOTE_SPECS; rc=\$?; rm -f ~/tmp/skeleton.php ~/tmp/*fixtures*.json; exit \$rc"
 
 echo "== Writing tests/integration/.env"
 cat > "$REPO_ROOT/tests/integration/.env" <<ENV
@@ -64,8 +78,8 @@ HUB_URL=$SITE_URL
 HUB_KEY=$PARTNER_API_KEY
 HUB_SECRET=$PARTNER_API_SECRET
 HUB_DOWNSTREAM_REF=reseller-one-month-premium-code
-# Set to 1 to run the order/lifecycle flow (spends reseller credit, provisions a real key)
-HUB_RUN_PROVISION=${HUB_RUN_PROVISION:-0}
+# Runtime flags (HUB_RUN_PROVISION, HUB_TERMINATE) are intentionally NOT set
+# here — pass them as env vars; .env would override the environment.
 ENV
 
 echo "Skeleton OK"
