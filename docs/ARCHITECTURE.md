@@ -107,11 +107,50 @@ mod_vpnhood_partner_log
    3. `localAPI('AcceptOrder', autosetup)` — runs `vpnhoodstore_CreateAccount`.
    4. `readDelivery` — read `accessTokenId` from the service's `serviceProperties` and
       fetch the access code via `ApiService::getAccessCode` (or CSV for bulk).
-4. Response: `{ keys: [{ upstreamServiceId, orderId, deliveryType, accessCode|csv }] }`.
+4. Response: `{ keys: [{ upstreamOrderId, customerReference, deliveryType, accessTokenId + accessCode | csv }] }`.
 
-Routine renewals are **native**: each order is a recurring service on the partner's
-client, so WHMCS invoices + charges credit every cycle, and `vpnhoodstore_Renew` extends
-the token. The `renew` API action is for explicit expiry re-sync.
+**`upstreamOrderId` is the connector-facing handle** for every subsequent action (`renew`,
+`suspend`, `unsuspend`, `terminate`, `getOrder`, `getAccessCode`). It is the WHMCS **order id**;
+`ownedServiceByOrder()` resolves it to the service *and* scopes on `partner.client_id` in the
+same query, so another partner's order simply returns `404`. `getAccessCode` re-reads the code
+live from the access server, resolving `accessTokenId` from the partner's own service rather
+than accepting it from the request.
+
+## Renewals — recurring Hub products are MANUAL
+
+Recurring products sold through the Hub do **not** auto-renew. WHMCS generates the renewal
+invoice and its email exactly as standard; it simply stays **Unpaid** until the partner calls
+`renew`. Nothing is suppressed, reversed, or re-dated — no hook is involved.
+
+> **REQUIRED SETTING:** WHMCS *Automatic Credit Use* must be **OFF**
+> (Configuration → System Settings → General Settings → Credit). This is the mechanism: with
+> it off, no invoice is ever paid from credit on its own, so renewal invoices naturally stay
+> Unpaid. The Hub instead applies credit **explicitly**, only where it means to
+> (`PartnerApiController::settleFromCredit`). If someone turns this setting back on, partner
+> services silently revert to auto-renewing.
+
+- **Order:** `placeSingleOrder` calls `settleFromCredit()` on the order invoice, then
+  `assertInvoicePaid` before provisioning — so ordering still fails closed on insufficient
+  credit (`402` + rollback).
+- **Renewal:** the cron-generated renewal invoice is left completely alone and stays Unpaid.
+  `nextduedate` does not advance while it is unpaid, and the token expiry tracks `nextduedate`,
+  so **access stops on the real term end** until the partner renews.
+- **Renew:** `PartnerApiController::renew` pays the outstanding invoice from native credit
+  (`402` if short, `409` if nothing outstanding). Paying a Hosting renewal invoice drives
+  WHMCS's normal renewal — `nextduedate` advances one cycle and `vpnhoodstore_Renew` re-syncs
+  the token; the call then re-asserts the token expiry idempotently.
+- **Scope:** `isPartnerProductService` — the service's product is in
+  `mod_vpnhood_partner_products`. Partner products are distinct from retail products, so retail
+  is never affected and no per-service marker is needed. Non-Hub services (one-time products,
+  anything created outside the Hub) fall back to a plain expiry re-sync (`resyncExpiry`).
+- **Overdue automation:** the unpaid invoice goes overdue normally, so WHMCS's standard
+  suspend/terminate automation applies. Suspension is harmless (the token is expiring anyway),
+  but auto-**termination** would destroy the service before the partner can renew — control
+  this in WHMCS *Automation Settings* (termination window), not in module code.
+
+> **Unverified against a live WHMCS.** Confirm that `applyCredit()` consumes
+> `tblclients.credit` and that paying the renewal invoice triggers the native renewal
+> (`nextduedate` advance + `vpnhoodstore_Renew`).
 
 ## Extending
 

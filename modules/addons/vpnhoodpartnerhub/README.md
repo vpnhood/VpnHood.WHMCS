@@ -74,7 +74,7 @@ Body: `{ "action": "<action>", ...params }`. Response:
 |--------|--------|---------|
 | `getBalance` | — | `{ clientId, balance, currency }` |
 | `getProducts` | — | `{ products: [{ downstreamRef, name, paymentType, allowMultipleQuantities, billingCycleMonths, availableCycles }] }` |
-| `order` | `downstreamRef`, `billingCycle?`, `quantity?`, `customerReference?` | `{ keys: [{ upstreamServiceId, orderId, deliveryType, accessCode|csv }] }` |
+| `order` | `downstreamRef`, `billingCycle?`, `quantity?`, `customerReference?` | `{ keys: [{ upstreamOrderId, customerReference, deliveryType, accessTokenId + accessCode \| csv }] }` |
 
 > `downstreamRef` is the WHMCS product id (as a string). Partners should call `getProducts`
 > to discover the available refs rather than hard-coding them. `paymentType` is the product's
@@ -92,12 +92,23 @@ Body: `{ "action": "<action>", ...params }`. Response:
 >
 > `quantity` above 1 is rejected with HTTP 422 unless the product has **Allow Multiple
 > Quantities** enabled on its Pricing tab (`allowMultipleQuantities` in `getProducts`).
-| `renew` | `upstreamServiceId`, `nextDueDate?` | `{ status, nextDueDate }` |
-| `suspend` | `upstreamServiceId` | `{ status }` |
-| `unsuspend` | `upstreamServiceId` | `{ status }` |
-| `terminate` / `cancel` | `upstreamServiceId` | `{ status }` |
-| `getOrder` | `upstreamServiceId` | `{ status, nextDueDate }` |
+| `renew` | `upstreamOrderId` | `{ status, nextDueDate }` |
+| `suspend` | `upstreamOrderId` | `{ status }` |
+| `unsuspend` | `upstreamOrderId` | `{ status }` |
+| `terminate` / `cancel` | `upstreamOrderId` | `{ status }` |
+| `getOrder` | `upstreamOrderId` | `{ status, nextDueDate }` |
+| `getAccessCode` | `upstreamOrderId` | `{ accessTokenId, accessCode }` |
 | `getTransactions` | — | `{ transactions: [...] }` (native credit history) |
+
+> **`upstreamOrderId` identifies an order everywhere.** It is the upstream WHMCS **order id**
+> returned by `order`; the Hub resolves it to the underlying service itself, scoped to the
+> calling partner's client. Ids from the request are never trusted — an order belonging to
+> another partner resolves to `404`.
+>
+> `getAccessCode` fetches the **current** code live from the access server. The connector
+> stores `accessTokenId` for reference but does not send it: the Hub resolves the token from
+> the partner's own order, so one partner can never read another's code. This is what backs the
+> connector's client-area "Get Premium Code" button.
 
 ### Example
 
@@ -107,6 +118,29 @@ curl -X POST https://store.example.com/modules/addons/vpnhoodpartnerhub/api.php 
   -H "Content-Type: application/json" \
   -d '{"action":"order","downstreamRef":"42","customerReference":"ABC123"}'
 ```
+
+## Renewals are manual
+
+> **REQUIRED:** WHMCS **Automatic Credit Use must be OFF**
+> (Configuration → System Settings → General Settings → Credit). This is what makes manual
+> renewal work: with it off, nothing is ever paid from credit on its own, so renewal invoices
+> stay Unpaid. The Hub applies credit explicitly for orders and for `renew`. **If this setting
+> is turned back on, partner services silently start auto-renewing again.**
+
+Recurring Hub products do **not** auto-renew. WHMCS still generates the renewal invoice and
+its email as standard (partners can disable that notification on their side), but nothing
+pays it — the partner's credit is never consumed. Nothing renews until the connector calls
+`renew`.
+
+- `renew` settles the outstanding renewal invoice from the partner's native credit, which
+  advances the service one billing cycle and extends the access-server token.
+- `402` — not enough credit to cover the invoice; nothing changes.
+- `409` — no renewal invoice is outstanding yet. One exists once WHMCS has generated the
+  upcoming renewal invoice (inside its Invoice Generation window before the due date).
+- If `renew` is never called, the token expires on the term end date and the end customer's
+  access stops until the partner renews.
+- `renew` no longer accepts a `nextDueDate` override — WHMCS computes the new term when the
+  invoice is paid.
 
 ## Safety model
 

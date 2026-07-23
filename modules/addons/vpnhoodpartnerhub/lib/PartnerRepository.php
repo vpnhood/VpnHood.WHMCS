@@ -317,6 +317,52 @@ class PartnerRepository
         return (float) ($value ?? 0);
     }
 
+    // -- Manual renewal (recurring Partner-Hub products) --------------------
+
+    /**
+     * Whether a service's product is a Partner-Hub-mapped product. Partner products
+     * are distinct from retail products (hidden from the retail store), so membership
+     * in mod_vpnhood_partner_products is a reliable "this is a partner order" signal
+     * without any per-service tagging.
+     */
+    public function isPartnerProductService(int $serviceId): bool
+    {
+        $packageId = Capsule::table('tblhosting')->where('id', $serviceId)->value('packageid');
+        if (!$packageId) {
+            return false;
+        }
+        return Capsule::table('mod_vpnhood_partner_products')
+            ->where('whmcs_product_id', $packageId)
+            ->exists();
+    }
+
+    /** Most recent Unpaid invoice carrying a Hosting line for this service, or null. */
+    public function outstandingRenewalInvoiceId(int $serviceId): ?int
+    {
+        $id = Capsule::table('tblinvoiceitems as i')
+            ->join('tblinvoices as inv', 'i.invoiceid', '=', 'inv.id')
+            ->where('i.type', 'Hosting')
+            ->where('i.relid', $serviceId)
+            ->where('inv.status', 'Unpaid')
+            ->orderBy('inv.id', 'desc')
+            ->value('inv.id');
+
+        return $id ? (int) $id : null;
+    }
+
+    /** Outstanding balance (invoice total minus recorded payments). */
+    public function invoiceBalance(int $invoiceId): float
+    {
+        $total = (float) Capsule::table('tblinvoices')->where('id', $invoiceId)->value('total');
+        $paid = (float) Capsule::table('tblaccounts')->where('invoiceid', $invoiceId)->sum('amountin');
+        return round($total - $paid, 2);
+    }
+
+    public function serviceNextDueDate(int $serviceId): ?string
+    {
+        return Capsule::table('tblhosting')->where('id', $serviceId)->value('nextduedate');
+    }
+
     // -- Logging ------------------------------------------------------------
 
     public function log(?int $partnerId, string $action, ?string $remoteIp, int $httpStatus, $request, $response): void

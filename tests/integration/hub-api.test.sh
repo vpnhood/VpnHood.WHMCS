@@ -85,16 +85,23 @@ if [ "${HUB_RUN_PROVISION:-0}" = "1" ]; then
   : "${HUB_DOWNSTREAM_REF:?set HUB_DOWNSTREAM_REF for the provisioning run}"
   echo "== Provisioning + lifecycle (SPENDS CREDIT, provisions a real key) =="
   call "{\"action\":\"order\",\"downstreamRef\":\"$HUB_DOWNSTREAM_REF\",\"customerReference\":\"integration-test\"}"
-  assert "order -> 200" 200 '"upstreamServiceId"'
-  SID="$(json_num upstreamServiceId)"
-  echo "        upstreamServiceId=$SID"
-  if [ -n "$SID" ]; then
-    call "{\"action\":\"getOrder\",\"upstreamServiceId\":$SID}";   assert "getOrder -> 200"   200 '"status"'
-    call "{\"action\":\"suspend\",\"upstreamServiceId\":$SID}";    assert "suspend -> 200"    200 'suspended'
-    call "{\"action\":\"unsuspend\",\"upstreamServiceId\":$SID}";  assert "unsuspend -> 200"  200 'active'
-    call "{\"action\":\"renew\",\"upstreamServiceId\":$SID}";      assert "renew -> 200"      200 'renewed'
+  assert "order -> 200" 200 '"upstreamOrderId"'
+  OID="$(json_num upstreamOrderId)"
+  echo "        upstreamOrderId=$OID"
+  if [ -n "$OID" ]; then
+    call "{\"action\":\"getOrder\",\"upstreamOrderId\":$OID}";      assert "getOrder -> 200"      200 '"status"'
+    call "{\"action\":\"getAccessCode\",\"upstreamOrderId\":$OID}"; assert "getAccessCode -> 200" 200 '"accessCode"'
+    call "{\"action\":\"suspend\",\"upstreamOrderId\":$OID}";       assert "suspend -> 200"       200 'suspended'
+    call "{\"action\":\"unsuspend\",\"upstreamOrderId\":$OID}";     assert "unsuspend -> 200"     200 'active'
+    # Manual renewal: 409 is the expected result when no renewal invoice is outstanding yet.
+    call "{\"action\":\"renew\",\"upstreamOrderId\":$OID}"
+    if [ "$CODE" = "409" ]; then
+      assert "renew -> 409 (nothing due yet)" 409 'No renewal invoice'
+    else
+      assert "renew -> 200" 200 'renewed'
+    fi
     if [ "${HUB_TERMINATE:-1}" = "1" ]; then
-      call "{\"action\":\"terminate\",\"upstreamServiceId\":$SID}"; assert "terminate -> 200" 200 'terminated'
+      call "{\"action\":\"terminate\",\"upstreamOrderId\":$OID}";   assert "terminate -> 200"     200 'terminated'
     fi
   fi
 else

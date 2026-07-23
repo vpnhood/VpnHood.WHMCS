@@ -43,4 +43,4 @@ Exit code is non-zero if any assertion fails, so it is CI-friendly.
 
 - `HUB_INSECURE=1` adds `-k` to curl for self-signed dev certificates.
 - The script only needs `bash` and `curl`. No `jq` dependency (it extracts the
-  `upstreamServiceId` with a simple grep, which is fine for these flat responses).
+  `upstreamOrderId` with a simple grep, which is fine for these flat responses).
