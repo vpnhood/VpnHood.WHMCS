@@ -139,6 +139,20 @@ function vpnhood_should_deny(bool $isRestricted): bool
     return (!$isAllowed && $isRestricted) || ($isAllowed && !$isRestricted);
 }
 
+/**
+ * Ordering enforcement (layers 3–5) applies ONLY to client-area web requests.
+ *
+ * WHMCS defines CLIENTAREA solely in client-facing entry scripts (cart.php,
+ * clientarea.php, …). Server-side order flows — admin-placed orders, cron, and
+ * localAPI AddOrder as used by the vpnhoodpartnerhub addon — run without a
+ * client session; filtering them silently empties the cart and breaks
+ * legitimate provisioning ("No items remain in the cart").
+ */
+function vpnhood_cart_enforcement_applies(): bool
+{
+    return defined('CLIENTAREA');
+}
+
 // =====================================================================
 // LAYER 1 – NAVIGATION & SIDEBAR FILTERING
 // =====================================================================
@@ -276,6 +290,9 @@ function vpnhood_redirect_away(): void
 // =====================================================================
 
 add_hook('ShoppingCartValidateProductUpdate', 1, function ($vars) {
+    if (!vpnhood_cart_enforcement_applies()) {
+        return [];
+    }
     $settings = get_vpnhoodstore_addon_params();
     if (!$settings) {
         return [];
@@ -300,6 +317,9 @@ add_hook('ShoppingCartValidateProductUpdate', 1, function ($vars) {
 // =====================================================================
 
 add_hook('PreCalculateCartTotals', 1, function ($vars) {
+    if (!vpnhood_cart_enforcement_applies()) {
+        return;
+    }
     $settings = get_vpnhoodstore_addon_params();
 
     if (!$settings || empty($_SESSION['cart']['products'])) {
@@ -333,6 +353,9 @@ add_hook('PreCalculateCartTotals', 1, function ($vars) {
 // =====================================================================
 
 add_hook('ShoppingCartValidateCheckout', 1, function ($vars) {
+    if (!vpnhood_cart_enforcement_applies()) {
+        return [];
+    }
     $settings = get_vpnhoodstore_addon_params();
     if (!$settings || empty($_SESSION['cart']['products'])) {
         return [];
