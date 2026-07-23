@@ -73,8 +73,6 @@
       "_role": "The partner/reseller funding client. Hub partner spend draws from this client's native WHMCS credit."
     }
   },
-  "_buyerNote": "The buyer client moved to VpnHood.WHMCS.Partner/tests/bootstrap/connector-fixtures.json — it belongs to the connector side.",
-
   "partner": {
     "name": "Test Reseller",
     "clientRole": "reseller",

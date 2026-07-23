@@ -242,7 +242,7 @@ class PartnerApiController
         try {
             // 2. Settle this order invoice from the partner's credit explicitly, then
             //    require Paid before provisioning.
-            $this->settleFromCredit($invoiceId);
+            $this->settleFromCredit($invoiceId, $clientId);
             $this->assertInvoicePaid($invoiceId);
 
             // 3. Accept the order → triggers vpnhoodstore_CreateAccount provisioning.
@@ -275,9 +275,13 @@ class PartnerApiController
      * simply stay Unpaid. Credit is applied only where we explicitly mean it — the
      * initial order invoice, and an outstanding renewal invoice in renew().
      *
+     * This build's applyCredit() signature is (invoiceId, userId, amount, noEmail=null)
+     * — it applies a SPECIFIC amount, not "as much as available". We cap the amount at
+     * the invoice's outstanding balance so it never overpays.
+     *
      * @throws ApiException
      */
-    private function settleFromCredit(int $invoiceId): void
+    private function settleFromCredit(int $invoiceId, int $clientId): void
     {
         if ($invoiceId === 0) {
             return; // Free product — no invoice to settle.
@@ -288,7 +292,17 @@ class PartnerApiController
             throw new ApiException('WHMCS credit application is unavailable on this install.', 500);
         }
 
-        applyCredit($invoiceId);
+        $balance = $this->repo->invoiceBalance($invoiceId);
+        if ($balance <= 0) {
+            return; // Already settled.
+        }
+        $credit = $this->repo->getClientCredit($clientId);
+        $amount = min($balance, $credit);
+        if ($amount <= 0) {
+            return; // No credit to apply; assertInvoicePaid()/the caller's balance check reports 402.
+        }
+
+        applyCredit($invoiceId, $clientId, $amount, true);
     }
 
     /**
@@ -388,7 +402,7 @@ class PartnerApiController
 
         // Settle from native credit: paying a Hosting renewal invoice is what triggers
         // WHMCS's standard renewal (nextduedate advance + vpnhoodstore_Renew).
-        $this->settleFromCredit($invoiceId);
+        $this->settleFromCredit($invoiceId, (int) $this->partner['client_id']);
 
         if (Capsule::table('tblinvoices')->where('id', $invoiceId)->value('status') !== 'Paid') {
             throw new ApiException('Renewal invoice could not be settled from credit.', 402);
