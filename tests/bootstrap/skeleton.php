@@ -256,7 +256,7 @@ function applySpec(PDO $db, array $spec, array &$report): void {
         $pass = getenv('TEST_CLIENT_PASSWORD');
         if ($pass) {
             try {
-                $u = one($db, 'SELECT id FROM tblusers WHERE email=?', [$c['email']]);
+                $u = one($db, 'SELECT id, password FROM tblusers WHERE email=?', [$c['email']]);
                 if (!$u) {
                     $uid = insertRow($db, 'tblusers', [
                         'first_name' => $c['firstname'], 'last_name' => $c['lastname'],
@@ -266,6 +266,14 @@ function applySpec(PDO $db, array $spec, array &$report): void {
                     $report['created'][] = "$role user login {$c['email']} (#$uid)";
                 } else {
                     $uid = (int)$u['id'];
+                    // A bcrypt hash can't be compared directly — verify against the
+                    // current secret and re-sync if it doesn't match (e.g. the login
+                    // pre-dates TEST_CLIENT_PASSWORD, or the secret rotated).
+                    if (!password_verify($pass, $u['password'])) {
+                        $db->prepare('UPDATE tblusers SET password=? WHERE id=?')
+                           ->execute([password_hash($pass, PASSWORD_DEFAULT), $uid]);
+                        $report['updated'][] = "$role user login password re-synced to secrets-dev.json";
+                    }
                 }
                 $uc = cols($db, 'tblusers_clients');
                 $userCol = isset($uc['auth_user_id']) ? 'auth_user_id' : 'userid';

@@ -16,9 +16,15 @@
 #
 # Optional:
 #   HUB_INSECURE=1       Pass -k to curl (self-signed dev certificate)
-#   HUB_RUN_PROVISION=1  Also run order + lifecycle. WARNING: this SPENDS PARTNER CREDIT
-#                        and provisions a REAL key on the access server.
-#   HUB_TERMINATE=1      Terminate the provisioned service at the end (default: 1)
+#   HUB_RUN_PROVISION=1  Place a real order (order + getOrder + getAccessCode). WARNING:
+#                        this SPENDS PARTNER CREDIT and provisions a REAL key on the access
+#                        server. The order is left ACTIVE — nothing else runs automatically.
+#   HUB_RUN_SUSPEND=1    Also exercise suspend -> unsuspend on that order (opt-in).
+#   HUB_RUN_RENEW=1      Also exercise renew on that order (opt-in).
+#   HUB_RUN_TERMINATE=1  Also terminate that order at the end (opt-in).
+#
+# Renewal, suspension, and termination are separate, opt-in jobs — none of them
+# run unless you explicitly ask for them via the flags above.
 #
 # Usage:
 #   cp .env.example .env && edit .env
@@ -88,7 +94,7 @@ call '{"action":"order","downstreamRef":"__definitely_not_mapped__"}'; assert "u
 
 if [ "${HUB_RUN_PROVISION:-0}" = "1" ]; then
   : "${HUB_DOWNSTREAM_REF:?set HUB_DOWNSTREAM_REF for the provisioning run}"
-  echo "== Provisioning + lifecycle (SPENDS CREDIT, provisions a real key) =="
+  echo "== Provisioning (SPENDS CREDIT, provisions a real key) =="
   call "{\"action\":\"order\",\"downstreamRef\":\"$HUB_DOWNSTREAM_REF\",\"customerReference\":\"integration-test\"}"
   assert "order -> 200" 200 '"upstreamOrderId"'
   OID="$(json_num upstreamOrderId)"
@@ -96,17 +102,33 @@ if [ "${HUB_RUN_PROVISION:-0}" = "1" ]; then
   if [ -n "$OID" ]; then
     call "{\"action\":\"getOrder\",\"upstreamOrderId\":$OID}";      assert "getOrder -> 200"      200 '"status"'
     call "{\"action\":\"getAccessCode\",\"upstreamOrderId\":$OID}"; assert "getAccessCode -> 200" 200 '"accessCode"'
-    call "{\"action\":\"suspend\",\"upstreamOrderId\":$OID}";       assert "suspend -> 200"       200 'suspended'
-    call "{\"action\":\"unsuspend\",\"upstreamOrderId\":$OID}";     assert "unsuspend -> 200"     200 'active'
-    # Manual renewal: 409 is the expected result when no renewal invoice is outstanding yet.
-    call "{\"action\":\"renew\",\"upstreamOrderId\":$OID}"
-    if [ "$CODE" = "409" ]; then
-      assert "renew -> 409 (nothing due yet)" 409 'No renewal invoice'
+
+    if [ "${HUB_RUN_SUSPEND:-0}" = "1" ]; then
+      echo "== Suspend/unsuspend (order #$OID, opt-in) =="
+      call "{\"action\":\"suspend\",\"upstreamOrderId\":$OID}";     assert "suspend -> 200"       200 'suspended'
+      call "{\"action\":\"unsuspend\",\"upstreamOrderId\":$OID}";   assert "unsuspend -> 200"     200 'active'
     else
-      assert "renew -> 200" 200 'renewed'
+      echo "(suspend/unsuspend skipped — set HUB_RUN_SUSPEND=1 to include)"
     fi
-    if [ "${HUB_TERMINATE:-1}" = "1" ]; then
+
+    if [ "${HUB_RUN_RENEW:-0}" = "1" ]; then
+      echo "== Renew (order #$OID, opt-in) =="
+      # Manual renewal: 409 is the expected result when no renewal invoice is outstanding yet.
+      call "{\"action\":\"renew\",\"upstreamOrderId\":$OID}"
+      if [ "$CODE" = "409" ]; then
+        assert "renew -> 409 (nothing due yet)" 409 'No renewal invoice'
+      else
+        assert "renew -> 200" 200 'renewed'
+      fi
+    else
+      echo "(renew skipped — set HUB_RUN_RENEW=1 to include)"
+    fi
+
+    if [ "${HUB_RUN_TERMINATE:-0}" = "1" ]; then
+      echo "== Terminate (order #$OID, opt-in) =="
       call "{\"action\":\"terminate\",\"upstreamOrderId\":$OID}";   assert "terminate -> 200"     200 'terminated'
+    else
+      echo "(terminate skipped — set HUB_RUN_TERMINATE=1 to include; order #$OID left Active)"
     fi
   fi
 else
