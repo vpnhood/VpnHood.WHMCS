@@ -16,14 +16,15 @@ use WHMCS\Module\Server\VpnHoodStore\Helper;
  *
  * Provisioning is delegated to WHMCS localAPI (AddOrder/AcceptOrder), which runs
  * the existing vpnhoodstore server module against the VpnHood access server.
- * Payment uses the partner client's NATIVE WHMCS credit balance — WHMCS applies
- * available credit to the generated invoice automatically. We never provision an
- * unpaid order: if the invoice is not Paid after ordering, the order is rolled
- * back and a 402 is returned.
+ * Payment uses the partner client's NATIVE WHMCS credit balance, applied EXPLICITLY
+ * by settleFromCredit(). We never provision an unpaid order: if the invoice is not
+ * Paid after ordering, the order is rolled back and a 402 is returned.
  *
- * IMPORTANT (admin requirement): the partner's WHMCS client must carry enough
- * credit, and WHMCS automatic credit application must remain enabled, so the
- * order invoice is settled from credit at generation time.
+ * IMPORTANT (admin requirement): WHMCS "Automatic Credit Use" must be OFF, and the
+ * partner's WHMCS client must carry enough credit. Auto-apply is deliberately
+ * disabled so that RENEWAL invoices for Hub products are never paid on their own —
+ * that is what makes recurring Hub products manual-renewal (see renew()). Turning
+ * that setting back on silently restores auto-renewal for partner services.
  */
 class PartnerApiController
 {
@@ -56,6 +57,7 @@ class PartnerApiController
             case 'terminate':       return $this->terminate($body);
             case 'cancel':          return $this->terminate($body); // alias
             case 'getOrder':        return $this->getOrder($body);
+            case 'getAccessCode':   return $this->getAccessCode($body);
             case 'getTransactions': return $this->getTransactions();
             default:
                 throw new ApiException("Unknown action: {$action}", 404);
@@ -124,13 +126,44 @@ class PartnerApiController
 
     private function getOrder(array $body): array
     {
-        $serviceId = (int) ($body['upstreamServiceId'] ?? 0);
-        $service = $this->ownedService($serviceId);
+        $orderId = $this->requestedOrderId($body);
+        $service = $this->ownedServiceByOrder($orderId);
 
         return [
-            'upstreamServiceId' => $serviceId,
-            'status'            => $service->domainstatus,
-            'nextDueDate'       => $service->nextduedate,
+            'upstreamOrderId' => $orderId,
+            'status'          => $service->domainstatus,
+            'nextDueDate'     => $service->nextduedate,
+        ];
+    }
+
+    /**
+     * Return the CURRENT access code for an order, fetched live from the access server.
+     *
+     * The connector stores only the order id and calls this on demand (its "Get Premium
+     * Code" button), mirroring how vpnhoodstore's client area fetches the code. The
+     * accessTokenId is resolved here from the partner's own service — it is never taken
+     * from the request, so a partner cannot read another partner's token.
+     */
+    private function getAccessCode(array $body): array
+    {
+        $orderId = $this->requestedOrderId($body);
+        $service = $this->ownedServiceByOrder($orderId);
+
+        $accessTokenId = $this->serviceProperty($service, 'accessTokenId');
+        if (!$accessTokenId) {
+            throw new ApiException('No access token is available for this order.', 404);
+        }
+
+        $json = json_decode((new ApiService())->getAccessCode($accessTokenId));
+        $accessCode = $json->accessToken->accessCode ?? null;
+        if ($accessCode === null) {
+            throw new ApiException('The access server did not return an access code.', 502);
+        }
+
+        return [
+            'upstreamOrderId' => $orderId,
+            'accessTokenId'   => $accessTokenId,
+            'accessCode'      => $accessCode,
         ];
     }
 
@@ -187,7 +220,8 @@ class PartnerApiController
     {
         $clientId = (int) $this->partner['client_id'];
 
-        // 1. Create the order (and its invoice). WHMCS applies credit automatically.
+        // 1. Create the order (and its invoice). Credit is NOT auto-applied — WHMCS
+        //    "Automatic Credit Use" is off so renewal invoices are never auto-paid.
         $orderParams = [
             'clientid'       => $clientId,
             'pid'            => $productId,
@@ -206,7 +240,9 @@ class PartnerApiController
         $serviceId = (int) $this->firstId($add['productids'] ?? '');
 
         try {
-            // 2. Ensure the invoice was settled from credit before provisioning.
+            // 2. Settle this order invoice from the partner's credit explicitly, then
+            //    require Paid before provisioning.
+            $this->settleFromCredit($invoiceId);
             $this->assertInvoicePaid($invoiceId);
 
             // 3. Accept the order → triggers vpnhoodstore_CreateAccount provisioning.
@@ -225,10 +261,34 @@ class PartnerApiController
         }
 
         return array_merge([
-            'upstreamServiceId' => $serviceId,
-            'orderId'           => $orderId,
+            'upstreamOrderId'   => $orderId,
             'customerReference' => $customerReference,
         ], $delivery);
+    }
+
+    /**
+     * Apply the client's native WHMCS credit to an invoice.
+     *
+     * WHMCS "Automatic Credit Use" is deliberately OFF on this install, so nothing is
+     * ever paid from credit on its own. That is what makes recurring Partner-Hub
+     * products manual-renewal: their renewal invoices are generated as standard and
+     * simply stay Unpaid. Credit is applied only where we explicitly mean it — the
+     * initial order invoice, and an outstanding renewal invoice in renew().
+     *
+     * @throws ApiException
+     */
+    private function settleFromCredit(int $invoiceId): void
+    {
+        if ($invoiceId === 0) {
+            return; // Free product — no invoice to settle.
+        }
+
+        require_once ROOTDIR . '/includes/invoicefunctions.php';
+        if (!function_exists('applyCredit')) {
+            throw new ApiException('WHMCS credit application is unavailable on this install.', 500);
+        }
+
+        applyCredit($invoiceId);
     }
 
     /**
@@ -268,7 +328,10 @@ class PartnerApiController
             $json = json_decode($apiService->getAccessCode($accessTokenId));
             return [
                 'deliveryType' => 'normal',
-                'accessCode'   => $json->accessToken->accessCode ?? null,
+                // The connector persists accessTokenId and re-fetches the code on demand
+                // via getAccessCode; accessCode here is the value at provisioning time.
+                'accessTokenId' => $accessTokenId,
+                'accessCode'    => $json->accessToken->accessCode ?? null,
             ];
         }
 
@@ -283,27 +346,77 @@ class PartnerApiController
     // -- Lifecycle relays ---------------------------------------------------
 
     /**
-     * Sync the access-server token expiry to the service's current nextduedate.
+     * Renew a service by settling its outstanding renewal invoice from the partner's
+     * native WHMCS credit.
      *
-     * Routine charging is handled natively: each order created a RECURRING service
-     * on the partner's client, so WHMCS invoices it every cycle and settles it from
-     * the partner's credit automatically. This endpoint lets the connector force an
-     * expiry re-sync (e.g. after an early/manual renewal upstream). It reuses the
-     * existing vpnhoodstore Helper so the access-server logic is not duplicated.
+     * Partner-Hub products are MANUAL RENEWAL. WHMCS generates the renewal invoice and
+     * its email exactly as standard, but with "Automatic Credit Use" off nothing pays
+     * it — it simply stays Unpaid and the partner's credit is never consumed. This
+     * action pays it, which drives WHMCS's normal renewal path: nextduedate advances
+     * one cycle and vpnhoodstore_Renew re-syncs the access-server token. If the partner
+     * never calls it, the token expires on the term end date and access stops.
+     *
+     * Services whose product is not Hub-mapped (one-time products, or anything created
+     * outside the Hub) keep the original expiry re-sync behavior.
      */
     private function renew(array $body): array
     {
-        $serviceId = (int) ($body['upstreamServiceId'] ?? 0);
-        $this->ownedService($serviceId);
+        $orderId = $this->requestedOrderId($body);
+        $serviceId = (int) $this->ownedServiceByOrder($orderId)->id;
 
-        // Optionally extend the term when the connector requests a specific paid-through date.
-        if (!empty($body['nextDueDate'])) {
-            $this->localApi('UpdateClientProduct', [
-                'serviceid'   => $serviceId,
-                'nextduedate' => date('Y-m-d', strtotime((string) $body['nextDueDate'])),
-            ]);
+        if (!$this->repo->isPartnerProductService($serviceId)) {
+            return $this->resyncExpiry($orderId, $serviceId);
         }
 
+        $invoiceId = $this->repo->outstandingRenewalInvoiceId($serviceId);
+        if ($invoiceId === null) {
+            throw new ApiException(
+                'No renewal invoice is currently outstanding for this service. Renewal becomes '
+                . 'available once WHMCS has generated the upcoming renewal invoice.',
+                409
+            );
+        }
+
+        $balance = $this->repo->invoiceBalance($invoiceId);
+        $credit = $this->repo->getClientCredit((int) $this->partner['client_id']);
+        if ($credit + 0.005 < $balance) {
+            throw new ApiException(
+                "Insufficient credit to renew. Invoice balance: {$balance}, available: {$credit}.",
+                402
+            );
+        }
+
+        // Settle from native credit: paying a Hosting renewal invoice is what triggers
+        // WHMCS's standard renewal (nextduedate advance + vpnhoodstore_Renew).
+        $this->settleFromCredit($invoiceId);
+
+        if (Capsule::table('tblinvoices')->where('id', $invoiceId)->value('status') !== 'Paid') {
+            throw new ApiException('Renewal invoice could not be settled from credit.', 402);
+        }
+
+        // Guarantee the token expiry matches the (now advanced) nextduedate, whether or
+        // not paying the invoice already ran vpnhoodstore_Renew. Idempotent either way.
+        $model = \WHMCS\Service\Service::find($serviceId);
+        if ($model) {
+            $result = Helper::renewOrUnsuspend(['model' => $model]);
+            if ($result !== 'success') {
+                throw new ApiException($result, 502);
+            }
+        }
+
+        return [
+            'upstreamOrderId' => $orderId,
+            'status'          => 'renewed',
+            'nextDueDate'     => $this->repo->serviceNextDueDate($serviceId),
+        ];
+    }
+
+    /**
+     * Re-sync the access-server token expiry to the service's current nextduedate,
+     * with no billing. Used for services that are not Hub-mapped products.
+     */
+    private function resyncExpiry(int $orderId, int $serviceId): array
+    {
         $model = \WHMCS\Service\Service::find($serviceId);
         if (!$model) {
             throw new ApiException('Service not found for renewal.', 404);
@@ -315,40 +428,77 @@ class PartnerApiController
         }
 
         return [
-            'upstreamServiceId' => $serviceId,
-            'status'            => 'renewed',
-            'nextDueDate'       => $model->nextduedate ?? null,
+            'upstreamOrderId' => $orderId,
+            'status'          => 'renewed',
+            'nextDueDate'     => $model->nextduedate ?? null,
         ];
     }
 
     private function suspend(array $body): array
     {
-        $serviceId = (int) ($body['upstreamServiceId'] ?? 0);
-        $this->ownedService($serviceId);
+        $orderId = $this->requestedOrderId($body);
+        $serviceId = (int) $this->ownedServiceByOrder($orderId)->id;
         $this->localApi('ModuleSuspend', ['serviceid' => $serviceId]);
-        return ['upstreamServiceId' => $serviceId, 'status' => 'suspended'];
+        return ['upstreamOrderId' => $orderId, 'status' => 'suspended'];
     }
 
     private function unsuspend(array $body): array
     {
-        $serviceId = (int) ($body['upstreamServiceId'] ?? 0);
-        $this->ownedService($serviceId);
+        $orderId = $this->requestedOrderId($body);
+        $serviceId = (int) $this->ownedServiceByOrder($orderId)->id;
         $this->localApi('ModuleUnsuspend', ['serviceid' => $serviceId]);
-        return ['upstreamServiceId' => $serviceId, 'status' => 'active'];
+        return ['upstreamOrderId' => $orderId, 'status' => 'active'];
     }
 
     private function terminate(array $body): array
     {
-        $serviceId = (int) ($body['upstreamServiceId'] ?? 0);
-        $this->ownedService($serviceId);
+        $orderId = $this->requestedOrderId($body);
+        $serviceId = (int) $this->ownedServiceByOrder($orderId)->id;
         $this->localApi('ModuleTerminate', ['serviceid' => $serviceId]);
-        return ['upstreamServiceId' => $serviceId, 'status' => 'terminated'];
+        return ['upstreamOrderId' => $orderId, 'status' => 'terminated'];
     }
 
     // -- Helpers ------------------------------------------------------------
 
     /**
-     * Load a service and assert it belongs to this partner's client.
+     * Read and validate the upstream order id from a request body.
+     *
+     * @throws ApiException
+     */
+    private function requestedOrderId(array $body): int
+    {
+        $orderId = (int) ($body['upstreamOrderId'] ?? 0);
+        if ($orderId <= 0) {
+            throw new ApiException('upstreamOrderId is required.', 422);
+        }
+        return $orderId;
+    }
+
+    /**
+     * Load the service belonging to an upstream ORDER, scoped to this partner's client.
+     *
+     * The Hub places one order per unit (placeSingleOrder), so a Hub order maps to exactly
+     * one service. The userid condition is what prevents a partner from acting on another
+     * partner's order — never look an order up without it.
+     *
+     * @throws ApiException
+     */
+    private function ownedServiceByOrder(int $orderId)
+    {
+        $service = Capsule::table('tblhosting')
+            ->where('orderid', $orderId)
+            ->where('userid', (int) $this->partner['client_id'])
+            ->first();
+
+        if ($service === null) {
+            throw new ApiException('Order not found for this partner.', 404);
+        }
+        return $service;
+    }
+
+    /**
+     * Load a service by its own id and assert it belongs to this partner's client.
+     * Used internally during ordering, where the service id is already known.
      *
      * @throws ApiException
      */
