@@ -36,7 +36,12 @@ if [ -f "$DIR/.env" ]; then set -a; . "$DIR/.env"; set +a; fi
 : "${HUB_SECRET:?set HUB_SECRET}"
 
 ENDPOINT="${HUB_URL%/}/modules/addons/vpnhoodpartnerhub/api.php"
-CURL=(curl -s -m 45)
+
+# The WinLibs mingw curl that shadows PATH in Git Bash fails with exit 43 on
+# -w '%{http_code}' — prefer the Windows system curl when present.
+CURL_BIN="${CURL_BIN:-curl}"
+[ -x "/c/Windows/System32/curl.exe" ] && CURL_BIN="/c/Windows/System32/curl.exe"
+CURL=("$CURL_BIN" -s -m 45)
 [ "${HUB_INSECURE:-0}" = "1" ] && CURL+=(-k)
 
 PASS=0; FAIL=0; BODY=""; CODE=""

@@ -1,5 +1,17 @@
 # Partner Hub — integration tests
 
+## connector-order.test.sh — buyer order end-to-end
+
+The full chain on the dev WHMCS: the buyer orders the connector product, the
+connector provisions through the Hub from the reseller's credit, the access
+code lands in the service properties, credit is debited, and the service is
+terminated again. Runs `tests/bootstrap/init-skeleton.sh` first (`SKIP_INIT=1`
+to skip) and needs SSH + admin credentials (`secrets-dev.json`).
+⚠ Spends ~2 USD reseller test credit and provisions a real access token
+(released by the final terminate; keep it with `CONNECTOR_TERMINATE=0`).
+
+## hub-api.test.sh — Hub API black-box test
+
 A black-box smoke test for the `vpnhoodpartnerhub` API. It drives the live HTTP
 endpoint exactly as a partner connector would, and asserts the auth, read, order,
 and lifecycle behaviour.
