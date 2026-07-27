@@ -412,7 +412,7 @@ class PartnerApiController
         // not paying the invoice already ran vpnhoodstore_Renew. Idempotent either way.
         $model = \WHMCS\Service\Service::find($serviceId);
         if ($model) {
-            $result = Helper::renewOrUnsuspend(['model' => $model]);
+            $result = Helper::renew(['model' => $model]);
             if ($result !== 'success') {
                 throw new ApiException($result, 502);
             }
@@ -436,7 +436,7 @@ class PartnerApiController
             throw new ApiException('Service not found for renewal.', 404);
         }
 
-        $result = Helper::renewOrUnsuspend(['model' => $model]);
+        $result = Helper::renew(['model' => $model]);
         if ($result !== 'success') {
             throw new ApiException($result, 502);
         }
@@ -452,7 +452,12 @@ class PartnerApiController
     {
         $orderId = $this->requestedOrderId($body);
         $serviceId = (int) $this->ownedServiceByOrder($orderId)->id;
-        $this->localApi('ModuleSuspend', ['serviceid' => $serviceId]);
+        $params = ['serviceid' => $serviceId];
+        $suspendReason = (string) ($body['suspendReason'] ?? '');
+        if ($suspendReason !== '') {
+            $params['suspendreason'] = $suspendReason;
+        }
+        $this->localApi('ModuleSuspend', $params);
         return ['upstreamOrderId' => $orderId, 'status' => 'suspended'];
     }
 

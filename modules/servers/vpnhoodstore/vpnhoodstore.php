@@ -160,18 +160,18 @@ function vpnhoodstore_CreateAccount(array $params): string {
 
 
 function vpnhoodstore_Renew(array $params): string {
-    return Helper::renewOrUnsuspend($params);
+    return Helper::renew($params);
 }
 
 function vpnhoodstore_SuspendAccount(array $params): string{
-    return Helper::suspendOrTerminate($params);
+    return Helper::suspend($params);
 }
 function vpnhoodstore_UnsuspendAccount(array $params): string{
-    return Helper::renewOrUnsuspend($params);
+    return Helper::unsuspend($params);
 }
 
 function vpnhoodstore_TerminateAccount(array $params): string{
-    return Helper::suspendOrTerminate($params);
+    return Helper::termination($params);
 }
 
 function vpnhoodstore_ClientArea(array $params): array {

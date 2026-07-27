@@ -14,7 +14,9 @@
  *   2. localAPI('ModuleSuspend') on the buyer's service — triggers the real
  *      vpnhoodpartner_SuspendAccount -> Hub suspend action -> the upstream
  *      service is suspended too
- *   3. assert both sides are Suspended
+ *   3. assert both sides are Suspended and the reseller's suspendreason
+ *      matches what was passed to ModuleSuspend (the connector must relay it,
+ *      not just the status)
  *
  * Prints a JSON report; exits non-zero if any assertion fails.
  */
@@ -49,25 +51,38 @@ if (!$resellerService) {
 $resellerServiceId = (int)$resellerService['id'];
 ok("upstream order #$upstreamOrderId -> reseller service #$resellerServiceId ({$resellerService['domainstatus']})");
 
-$suspend = localAPI('ModuleSuspend', ['serviceid' => $buyerServiceId, 'suspendreason' => 'suspend.test.php']);
+$reason = 'suspend.test.php';
+$suspend = localAPI('ModuleSuspend', ['serviceid' => $buyerServiceId, 'suspendreason' => $reason]);
 if (($suspend['result'] ?? '') !== 'success') {
     bad('ModuleSuspend failed: ' . json_encode($suspend));
     finish();
 }
 ok("buyer service #$buyerServiceId ModuleSuspend called, relayed through the connector to the Hub");
 
-$buyerStatus = one($db, 'SELECT domainstatus FROM tblhosting WHERE id=?', [$buyerServiceId])['domainstatus'] ?? '?';
-if ($buyerStatus === 'Suspended') {
+$buyerRow = one($db, 'SELECT domainstatus, suspendreason FROM tblhosting WHERE id=?', [$buyerServiceId]);
+if (($buyerRow['domainstatus'] ?? '?') === 'Suspended') {
     ok("buyer service #$buyerServiceId Suspended");
 } else {
-    bad("buyer service #$buyerServiceId not Suspended (status: $buyerStatus)");
+    bad("buyer service #$buyerServiceId not Suspended (status: " . ($buyerRow['domainstatus'] ?? '?') . ')');
+}
+if (($buyerRow['suspendreason'] ?? '') === $reason) {
+    ok("buyer service #$buyerServiceId suspendreason stored: $reason");
+} else {
+    $got = $buyerRow['suspendreason'] ?? '';
+    bad("buyer service #$buyerServiceId suspendreason mismatch (expected '$reason', got '$got')");
 }
 
-$resellerStatus = one($db, 'SELECT domainstatus FROM tblhosting WHERE id=?', [$resellerServiceId])['domainstatus'] ?? '?';
-if ($resellerStatus === 'Suspended') {
+$resellerRow = one($db, 'SELECT domainstatus, suspendreason FROM tblhosting WHERE id=?', [$resellerServiceId]);
+if (($resellerRow['domainstatus'] ?? '?') === 'Suspended') {
     ok("reseller service #$resellerServiceId Suspended");
 } else {
-    bad("reseller service #$resellerServiceId not Suspended (status: $resellerStatus)");
+    bad("reseller service #$resellerServiceId not Suspended (status: " . ($resellerRow['domainstatus'] ?? '?') . ')');
+}
+if (($resellerRow['suspendreason'] ?? '') === $reason) {
+    ok("reseller service #$resellerServiceId suspendreason synced: $reason");
+} else {
+    $got = $resellerRow['suspendreason'] ?? '';
+    bad("reseller service #$resellerServiceId suspendreason NOT synced (expected '$reason', got '$got')");
 }
 
 finish();
