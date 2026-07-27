@@ -31,25 +31,24 @@ class Helper {
     }
 
     /*** Internal helper to update the token via API ***/
-    public static function updateAccessToken(string $accessTokenId, string $expirationDate): void {
-        $updateParams = [
-            'expirationTime' => [
-                'value' => $expirationDate
-            ]
-        ];
-
+    public static function updateAccessToken(string $accessTokenId, array $updateParams): void {
         $apiService = new ApiService();
         $apiService->updateAccessToken($accessTokenId, $updateParams);
     }
 
-    /*** Handles Renewal and Un-suspension ***/
-    public static function renewOrUnsuspend(array $params): string {
+    /*** Handles Renewal ***/
+    public static function renew(array $params): string {
         try {
             $accessTokenId = $params['model']->serviceProperties->get('accessTokenId');
             $expirationDate = $params['model']['nextduedate'];
+            $updateParams = [
+                'expirationTime' => [
+                    'value' => $expirationDate
+                ]
+            ];
 
             // Call the static method using self::
-            self::updateAccessToken($accessTokenId, $expirationDate);
+            self::updateAccessToken($accessTokenId, $updateParams);
 
             return 'success';
         } catch (\Exception $e) {
@@ -58,16 +57,66 @@ class Helper {
         }
     }
 
-    /*** Handles Suspension and Termination ***/
-    public static function suspendOrTerminate(array $params): string {
+    /*** Handles Suspension ***/
+    public static function suspend(array $params): string {
+        try {
+            $accessTokenId = $params['model']->serviceProperties->get('accessTokenId');
+            $updateParams = [
+                'isEnabled' => [
+                    'value' => false
+                ]
+            ];
+
+            self::updateAccessToken($accessTokenId, $updateParams);
+
+            return 'success';
+        } catch (\Exception $e) {
+            logModuleCall('vpnhoodstore', __FUNCTION__, $params, $e->getMessage(), $e->getTraceAsString());
+            return "VpnHoodStore Error: " . $e->getMessage();
+        }
+    }
+
+    /*** Handles Un-suspension ***/
+    public static function unsuspend(array $params): string {
+        try {
+            $accessTokenId = $params['model']->serviceProperties->get('accessTokenId');
+            $updateParams = [
+                'isEnabled' => [
+                    'value' => true
+                ]
+            ];
+
+            // Call the static method using self::
+            self::updateAccessToken($accessTokenId, $updateParams);
+
+            return 'success';
+        } catch (\Exception $e) {
+            logModuleCall('vpnhoodstore', __FUNCTION__, $params, $e->getMessage(), $e->getTraceAsString());
+            return "VpnHoodStore Error: " . $e->getMessage();
+        }
+    }
+
+    /*** Handles Termination ***/
+    public static function termination(array $params): string {
         try {
             $accessTokenId = $params['model']->serviceProperties->get('accessTokenId');
 
-            // Prefix with \ for global PHP classes
-            $date = new \DateTime('now', new \DateTimeZone('UTC'));
-            $expirationDate = $date->format('Y-m-d');
+            // Expire as of now, not nextduedate: nextduedate is unset ('0000-00-00', not a
+            // valid date) for one-time products, and even when set (recurring), it's the
+            // *next scheduled billing date* — using it here would leave the token valid
+            // until then instead of actually terminating access immediately.
+            $expirationDate = (new \DateTime('now', new \DateTimeZone('UTC')))->format('Y-m-d');
 
-            self::updateAccessToken($accessTokenId, $expirationDate);
+            $updateParams = [
+                'expirationTime' => [
+                    'value' => $expirationDate
+                ],
+                'isEnabled' => [
+                    'value' => false
+                ]
+            ];
+
+            self::updateAccessToken($accessTokenId, $updateParams);
 
             return 'success';
         } catch (\Exception $e) {

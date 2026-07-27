@@ -93,7 +93,7 @@ Body: `{ "action": "<action>", ...params }`. Response:
 > `quantity` above 1 is rejected with HTTP 422 unless the product has **Allow Multiple
 > Quantities** enabled on its Pricing tab (`allowMultipleQuantities` in `getProducts`).
 | `renew` | `upstreamOrderId` | `{ status, nextDueDate }` |
-| `suspend` | `upstreamOrderId` | `{ status }` |
+| `suspend` | `upstreamOrderId`, `suspendReason?` | `{ status }` |
 | `unsuspend` | `upstreamOrderId` | `{ status }` |
 | `terminate` / `cancel` | `upstreamOrderId` | `{ status }` |
 | `getOrder` | `upstreamOrderId` | `{ status, nextDueDate }` |
