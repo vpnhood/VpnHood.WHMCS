@@ -1,0 +1,85 @@
+{
+  "_comment": "Test-environment spec for the dev WHMCS. skeleton.php ensures everything here exists (create-if-missing, never destructive). Recorded from the live dev box on 2026-07-19.",
+
+  "productGroup": {
+    "name": "VpnHood! CONNECT Reseller",
+    "slug": "vpnhood-connect-for-reseller",
+    "hidden": 0,
+    "order": 3,
+    "disabledgateways": ",paymenthood,stripe,paypal_ppcpv,paypal_acdc,protx,"
+  },
+
+  "products": [
+    {
+      "slug": "reseller-one-month-premium-code",
+      "name": "Reseller - One-Month Premium Code",
+      "paytype": "onetime",
+      "price": "2.00",
+      "type": "other",
+      "servertype": "vpnhoodstore",
+      "autosetup": "payment",
+      "welcomeemail": 18,
+      "configoption1": "3a04da83-a4f5-4750-8c16-dce8efb259f5",
+      "configoption2": "VpnHood Official",
+      "configoption3": "7750",
+      "configoption4": "982",
+      "_moduleSettings": "vpnhoodstore module settings recorded from the hand-made dev product #10 on 2026-07-20"
+    },
+    {
+      "slug": "reseller-one-month-premium-code-subscription",
+      "name": "Reseller - One-Month Premium Code (Subscription)",
+      "paytype": "recurring",
+      "price": "2.00",
+      "type": "other",
+      "servertype": "vpnhoodstore",
+      "autosetup": "payment",
+      "welcomeemail": 18,
+      "configoption1": "3a04da83-a4f5-4750-8c16-dce8efb259f5",
+      "configoption2": "VpnHood Official",
+      "configoption3": "7753",
+      "configoption4": "982",
+      "_moduleSettings": "vpnhoodstore module settings recorded from the hand-made dev product #11 on 2026-07-20"
+    }
+  ],
+
+  "requiredModules": [
+    "modules/servers/vpnhoodstore",
+    "modules/addons/vpnhoodconfig",
+    "modules/addons/vpnhoodpartnerhub"
+  ],
+
+  "addons": [
+    {
+      "module": "vpnhoodpartnerhub",
+      "_comment": "Activation state + config recorded from the admin-saved setup of 2026-07-19. version must match the module's addon config.",
+      "settings": {
+        "version": "1.0.0",
+        "access": "1",
+        "RequireIpAllowlist": "",
+        "DefaultCurrency": "USD",
+        "OrderGateway": "banktransfer"
+      }
+    }
+  ],
+
+  "clients": {
+    "reseller": {
+      "email": "test-reseller@vpnhood.com",
+      "firstname": "Test",
+      "lastname": "Reseller",
+      "groupid": 1,
+      "_groupidNote": "vpnhoodconfig AllowedClientGroups=1 — resellers must be in this client group to see the restricted reseller store",
+      "minCredit": 500,
+      "_role": "The partner/reseller funding client. Hub partner spend draws from this client's native WHMCS credit."
+    }
+  },
+  "partner": {
+    "name": "Test Reseller",
+    "clientRole": "reseller",
+    "_credentials": "api key/secret live in <Vh root>/.user/whmcs/secrets-dev.json (partnerApiKey / partnerApiSecret), passed to skeleton.php via env",
+    "productRefs": [
+      { "downstream_ref": "reseller-one-month-premium-code", "billing_cycle_months": 1 },
+      { "downstream_ref": "reseller-one-month-premium-code-subscription", "billing_cycle_months": 1 }
+    ]
+  }
+}
