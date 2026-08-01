@@ -55,6 +55,23 @@ None of these three clean up before or after running.
 Only `purchase-order.test.sh` ever wipes state; the other four act on
 whatever it last left behind.
 
+## sync-products.test.sh — the connector addon's product sync
+
+**`sync-products.test.sh`** — covers the `vpnhoodpartnerconfig` addon page's "create
+missing products" button (the `VpnHood.WHMCS.Partner` repo). It offers one extra
+product to the test partner via a temporary Hub mapping (added through the Hub's own
+`PartnerRepository`, the code path the admin UI uses), reads it back over the live Hub
+HTTP API exactly as the addon page does, then runs the real sync with three refs at
+once — the new one, one that already exists locally, and one the Hub never offered.
+Asserts exactly one product created, the existing one skipped rather than duplicated,
+the un-offered one refused, and that the new product is wired to `vpnhoodpartner` with
+the right `configoption1`, hidden, priced 0.00 on exactly the upstream's billing cycles,
+with `allowqty` off — then re-runs to prove idempotency.
+
+Independent of the lifecycle scripts and safe to run anytime: it places no order, so it
+spends **no credit** and provisions **no access token**. It removes both the product it
+creates and the temporary mapping whether or not the assertions pass.
+
 ## hub-api.test.sh — Hub API black-box test
 
 A black-box smoke test for the `vpnhoodpartnerhub` API. It drives the live HTTP
