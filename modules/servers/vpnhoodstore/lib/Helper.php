@@ -5,6 +5,8 @@ use WHMCS\Module\Server\VpnHoodStore\ApiService;
 
 class Helper {
 
+    public const string DEFAULT_ACCESS_TOKEN_GROUP = 'None';
+
     /*** Create Access Token and save its ID to the service properties ***/
     public static function createAccessToken(array $params, array $createParams): void {
         $apiService = new ApiService();
@@ -29,25 +31,24 @@ class Helper {
     }
 
     /*** Internal helper to update the token via API ***/
-    public static function updateAccessToken(string $accessTokenId, string $expirationDate): void {
-        $updateParams = [
-            'expirationTime' => [
-                'value' => $expirationDate
-            ]
-        ];
-
+    public static function updateAccessToken(string $accessTokenId, array $updateParams): void {
         $apiService = new ApiService();
         $apiService->updateAccessToken($accessTokenId, $updateParams);
     }
 
-    /*** Handles Renewal and Un-suspension ***/
-    public static function renewOrUnsuspend(array $params): string {
+    /*** Handles Renewal ***/
+    public static function renew(array $params): string {
         try {
             $accessTokenId = $params['model']->serviceProperties->get('accessTokenId');
             $expirationDate = $params['model']['nextduedate'];
+            $updateParams = [
+                'expirationTime' => [
+                    'value' => $expirationDate
+                ]
+            ];
 
             // Call the static method using self::
-            self::updateAccessToken($accessTokenId, $expirationDate);
+            self::updateAccessToken($accessTokenId, $updateParams);
 
             return 'success';
         } catch (\Exception $e) {
@@ -56,16 +57,66 @@ class Helper {
         }
     }
 
-    /*** Handles Suspension and Termination ***/
-    public static function suspendOrTerminate(array $params): string {
+    /*** Handles Suspension ***/
+    public static function suspend(array $params): string {
+        try {
+            $accessTokenId = $params['model']->serviceProperties->get('accessTokenId');
+            $updateParams = [
+                'isEnabled' => [
+                    'value' => false
+                ]
+            ];
+
+            self::updateAccessToken($accessTokenId, $updateParams);
+
+            return 'success';
+        } catch (\Exception $e) {
+            logModuleCall('vpnhoodstore', __FUNCTION__, $params, $e->getMessage(), $e->getTraceAsString());
+            return "VpnHoodStore Error: " . $e->getMessage();
+        }
+    }
+
+    /*** Handles Un-suspension ***/
+    public static function unsuspend(array $params): string {
+        try {
+            $accessTokenId = $params['model']->serviceProperties->get('accessTokenId');
+            $updateParams = [
+                'isEnabled' => [
+                    'value' => true
+                ]
+            ];
+
+            // Call the static method using self::
+            self::updateAccessToken($accessTokenId, $updateParams);
+
+            return 'success';
+        } catch (\Exception $e) {
+            logModuleCall('vpnhoodstore', __FUNCTION__, $params, $e->getMessage(), $e->getTraceAsString());
+            return "VpnHoodStore Error: " . $e->getMessage();
+        }
+    }
+
+    /*** Handles Termination ***/
+    public static function termination(array $params): string {
         try {
             $accessTokenId = $params['model']->serviceProperties->get('accessTokenId');
 
-            // Prefix with \ for global PHP classes
-            $date = new \DateTime('now', new \DateTimeZone('UTC'));
-            $expirationDate = $date->format('Y-m-d');
+            // Expire as of now, not nextduedate: nextduedate is unset ('0000-00-00', not a
+            // valid date) for one-time products, and even when set (recurring), it's the
+            // *next scheduled billing date* — using it here would leave the token valid
+            // until then instead of actually terminating access immediately.
+            $expirationDate = (new \DateTime('now', new \DateTimeZone('UTC')))->format('Y-m-d');
 
-            self::updateAccessToken($accessTokenId, $expirationDate);
+            $updateParams = [
+                'expirationTime' => [
+                    'value' => $expirationDate
+                ],
+                'isEnabled' => [
+                    'value' => false
+                ]
+            ];
+
+            self::updateAccessToken($accessTokenId, $updateParams);
 
             return 'success';
         } catch (\Exception $e) {
@@ -104,5 +155,22 @@ class Helper {
         header('Expires: 0');
 
         echo $response;
+    }
+
+    public static function isCsvTokenDelivery(array $params): bool {
+        return self::isCsvTokenDeliveryFor(
+            (int)($params['qty']),
+            (int) $params['model']->product->allowqty
+        );
+    }
+
+    /**
+     * Single source of truth for the delivery mode: CSV (bulk) delivery applies only
+     * to Scaling Service products (allowqty 2) ordered with more than one unit.
+     * Also used by vpnhoodpartnerhub when reading back a provisioned key.
+     */
+    public static function isCsvTokenDeliveryFor(int $count, int $allowQty): bool {
+        // allowqty: 0 = No, 1 = Multiple Services, 2 = Scaling Service
+        return $count > 1 && $allowQty === 2;
     }
 }
