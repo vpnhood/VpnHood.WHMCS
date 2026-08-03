@@ -5,8 +5,6 @@ use WHMCS\Module\Server\VpnHoodStore\ApiService;
 
 class Helper {
 
-    public const string DEFAULT_ACCESS_TOKEN_GROUP = 'None';
-
     /*** Create Access Token and save its ID to the service properties ***/
     public static function createAccessToken(array $params, array $createParams): void {
         $apiService = new ApiService();
@@ -157,20 +155,18 @@ class Helper {
         echo $response;
     }
 
-    public static function isCsvTokenDelivery(array $params): bool {
-        return self::isCsvTokenDeliveryFor(
-            (int)($params['qty']),
-            (int) $params['model']->product->allowqty
-        );
-    }
 
     /**
-     * Single source of truth for the delivery mode: CSV (bulk) delivery applies only
-     * to Scaling Service products (allowqty 2) ordered with more than one unit.
+     * Single source of truth for the delivery mode. CSV (bulk) delivery applies when the
+     * product is explicitly configured for it ("Token Delivery Method" = CSV), or implicitly
+     * for Scaling Service products (allowqty 2) ordered with more than one unit.
      * Also used by vpnhoodpartnerhub when reading back a provisioned key.
+     *
+     * @param int $deliveryType product configoption4: 0 = Normal, 1 = CSV
+     * @param int $count        units ordered (service qty)
+     * @param int $allowQty     product allowqty: 0 = No, 1 = Multiple Services, 2 = Scaling Service
      */
-    public static function isCsvTokenDeliveryFor(int $count, int $allowQty): bool {
-        // allowqty: 0 = No, 1 = Multiple Services, 2 = Scaling Service
-        return $count > 1 && $allowQty === 2;
+    public static function isCsvTokenDelivery(int $deliveryType, int $count, int $allowQty): bool {
+        return $deliveryType === 1 || ($count > 1 && $allowQty === 2);
     }
 }

@@ -39,6 +39,29 @@ Provisions VpnHood access tokens directly against the access server. Core pieces
   Stores the created token id in the service's `serviceProperties['accessTokenId']`.
 - `lib/AsyncApiClientFactory.php` — cURL client (Bearer auth) singleton.
 
+**Product config options** are stored positionally by WHMCS in `tblproducts.configoptionN`,
+in the order `_ConfigOptions` declares them:
+
+| Slot | Field | Notes |
+|---|---|---|
+| `configoption1` | Server Farm | serverFarmId |
+| `configoption2` | Access Token Name | free text |
+| `configoption3` | Access Token Profile | accessTokenProfileId |
+| `configoption4` | Token Delivery Method | `0` = Normal, `1` = CSV |
+| `configoption5` | Access Token Groups | accessTokenGroupId, `0` = None |
+
+> **Inserting or reordering a field shifts every slot after it.** WHMCS does not migrate
+> existing rows, so any product saved under the old layout keeps its old values in the old
+> slots and must be re-saved in the admin UI. `configoption4`/`configoption5` were introduced
+> by the Token Delivery Method field — before it, the access token group lived in
+> `configoption4`. Prefer appending new fields last.
+
+**Delivery mode** is decided by `Helper::isCsvTokenDelivery($deliveryType, $count, $allowQty)` —
+the single source of truth, also called by `vpnhoodpartnerhub`. CSV (bulk) applies when the
+product is explicitly set to CSV, or implicitly for Scaling Service products (`allowqty` 2)
+ordered with more than one unit. Normal delivery stores an `accessTokenId` on the service;
+CSV delivery does **not** — bulk keys are read back by `customerId` + `orderId`.
+
 **Reuse contract:** `ApiService` and `Helper` are the reusable provisioning primitives.
 `vpnhoodpartnerhub` calls them directly — do not duplicate access-server logic elsewhere.
 
@@ -164,6 +187,36 @@ invoice and its email exactly as standard; it simply stays **Unpaid** until the 
 - **Never trust client-supplied ids:** every action scopes to `partner.client_id`
   (`ownedService()` enforces ownership). Preserve this when adding actions.
 - **Reuse provisioning:** call `ApiService`/`Helper`; never hand-roll access-server requests.
+
+## Versioning & releases
+
+Every module in this repo carries the **same** version number — they are built, deployed and
+supported together, so "what version are you on?" has exactly one answer, and it matches the
+git tag.
+
+- **`VERSION` (repo root) is the single source of truth.** Never hand-edit a version inside a
+  module; it will be overwritten.
+- **`scripts/set-version.sh`** stamps `VERSION` into every module. `--check` verifies they all
+  agree and exits non-zero if not (CI runs this after stamping). Run it locally any time to
+  re-sync; it is idempotent.
+- **`.github/workflows/release.yml`** runs on every push to `main`: bump the patch number,
+  stamp it, commit `chore(release): vX.Y.Z [skip ci]`, tag `vX.Y.Z`, and publish a GitHub
+  Release. The `[skip ci]` marker plus an `if:` guard stop the release commit from
+  re-triggering the workflow.
+
+Where the number lands, and why the two mechanisms differ:
+
+| Module kind | Stored in | Shown to an admin |
+|---|---|---|
+| Addon (`vpnhoodconfig`, `vpnhoodpartnerhub`) | `'version'` in `<module>_config()` | Natively, in System Settings → Addon Modules |
+| Server (`vpnhoodstore`) | `"version"` in `whmcs.json` | **Not natively** — WHMCS has no version display for provisioning modules, so `vpnhoodconfig_output()` reads the manifest back and renders it |
+
+> `MetaData()`'s `APIVersion` is the WHMCS *module API* contract, not the module's own
+> version — leave it alone.
+
+The connector repo (**VpnHood.WHMCS.Partner**) has the same `VERSION` + script + workflow, but
+versions **independently**: the two ship to different WHMCS installs on their own cadence. The
+Hub API contract is what couples them, not the version number.
 
 ## Conventions
 

@@ -44,10 +44,14 @@ function vpnhoodstore_ConfigOptions(array $params = []): array {
 
         // Build options array from access token groups.
         $accessTokenGroupOptions = [];
-        $accessTokenGroupOptions[0] = Helper::DEFAULT_ACCESS_TOKEN_GROUP; // Add a default option for "None"
+        $accessTokenGroupOptions[0] = 'None'; // Add a default option for "None"
         foreach ($accessTokenGroups as $item) {
             $accessTokenGroupOptions[$item->accessTokenGroupId] = $item->accessTokenGroupName;
         }
+
+        // Build options array for token delivery methods. Keys are explicit because WHMCS
+        // stores the *key* in configoptionN, and Helper::isCsvTokenDelivery() compares on it.
+        $tokenDeliveryMethods = [0 => "Normal", 1 => "CSV"];
 
         // Reseller (Scaling Service) heads-up, folded into a real field's description so it
         // renders reliably (a separate 'none' field is not always shown by WHMCS).
@@ -72,6 +76,13 @@ function vpnhoodstore_ConfigOptions(array $params = []): array {
                 "Type" => "dropdown",
                 "Options" => $accessTokenProfileOptions,
                 "Default" => "",
+            ],
+            "tokenDelivery" => [
+                "FriendlyName" => "Token Delivery Method",
+                "Type" => "dropdown",
+                "Options" => $tokenDeliveryMethods,
+                "Description" => "The CSV is for the resellers and returns a download link in the client area.",
+                "Default" => 0,
             ],
             "accessTokenGroupsId" => [
                 "FriendlyName" => "Access Token Groups",
@@ -125,7 +136,7 @@ function vpnhoodstore_scalingServiceNotice(array $params): string {
 
 function vpnhoodstore_CreateAccount(array $params): string {
     try {
-        $accessTokenGroupId = (int)$params['configoption4'] === 0 ? null : $params['configoption4']; // "None" is key 0 (falsy) -> no group
+        $accessTokenGroupId = (int)$params['configoption5'] === 0 ? null : $params['configoption5']; // "None" is key 0 (falsy) -> no group
         $count = (int)($params['qty']);
 
         $isOneTimeProduct = $params['model']->product->paytype === "onetime"; //Check if the product is one time payment
@@ -144,7 +155,7 @@ function vpnhoodstore_CreateAccount(array $params): string {
             'shopId'               => 'WHMCS'
         ];
 
-        if (Helper::isCsvTokenDelivery($params))
+        if (Helper::isCsvTokenDelivery((int)$params['configoption4'], $count, (int)$params['model']->product->allowqty))
             Helper::createAccessTokenList($createParams);
         else
             Helper::createAccessToken($params, $createParams);
@@ -175,23 +186,23 @@ function vpnhoodstore_TerminateAccount(array $params): string{
 }
 
 function vpnhoodstore_ClientArea(array $params): array {
-    $isNormalTokenDelivery = !Helper::isCsvTokenDelivery($params);
+    $isCsvTokenDelivery = Helper::isCsvTokenDelivery((int)$params['configoption4'], (int)($params['qty']), (int)$params['model']->product->allowqty);
 
     // Fetch the access code from the API through the AJAX request.
     if (isset($_SERVER['HTTP_X_REQUESTED_WITH']) && $_SERVER['HTTP_X_REQUESTED_WITH'] === 'XMLHttpRequest') {
         try {
 
-            // Returns Access Code as Normal Token Delivery in the client area
-            if ($isNormalTokenDelivery) {
-               $accessTokenId = $params['model']->serviceProperties->get('accessTokenId');
-                Helper::getAccessCode($accessTokenId);
-            }
-
             // Returns a download link as CSV Token Delivery for resellers in the client area.
-            else{
+            if ($isCsvTokenDelivery) {
                 $customerId = (string)$params['userid'];
                 $orderId = (string)$params['model']['orderid'];
                 Helper::getAccessCodeCsvFile($customerId, $orderId);
+            }
+
+            // Returns Access Code as Normal Token Delivery in the client area.
+            else{
+                $accessTokenId = $params['model']->serviceProperties->get('accessTokenId');
+                Helper::getAccessCode($accessTokenId);
             }
 
             exit;
@@ -202,7 +213,7 @@ function vpnhoodstore_ClientArea(array $params): array {
             logModuleCall(
                 'VpnHoodStore',
                 'ClientArea',
-                sprintf('Is Normal Token Delivery: %s', $isNormalTokenDelivery),
+                sprintf('Is CSV Token Delivery: %s', $isCsvTokenDelivery ? 'yes' : 'no'),
                 sprintf('Error: %s', $e->getMessage())
             );
 
@@ -216,5 +227,5 @@ function vpnhoodstore_ClientArea(array $params): array {
         }
     }
 
-    return array('templatefile' => $isNormalTokenDelivery ? 'clientarea' : 'clientarea-reseller.tpl');
+    return array('templatefile' => $isCsvTokenDelivery ? 'clientarea-reseller.tpl' : 'clientarea.tpl');
 }

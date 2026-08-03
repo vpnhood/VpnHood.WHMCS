@@ -22,8 +22,9 @@
       "configoption1": "3a04da83-a4f5-4750-8c16-dce8efb259f5",
       "configoption2": "VpnHood Official",
       "configoption3": "7750",
-      "configoption4": "982",
-      "_moduleSettings": "vpnhoodstore module settings recorded from the hand-made dev product #10 on 2026-07-20"
+      "configoption4": "0",
+      "configoption5": "982",
+      "_moduleSettings": "vpnhoodstore module settings recorded from the hand-made dev product #10 on 2026-07-20. configoption4 = Token Delivery Method (0 = Normal, 1 = CSV), configoption5 = Access Token Group — the group moved from slot 4 to 5 when the delivery-method field was added."
     },
     {
       "slug": "reseller-one-month-premium-code-subscription",
@@ -37,8 +38,9 @@
       "configoption1": "3a04da83-a4f5-4750-8c16-dce8efb259f5",
       "configoption2": "VpnHood Official",
       "configoption3": "7753",
-      "configoption4": "982",
-      "_moduleSettings": "vpnhoodstore module settings recorded from the hand-made dev product #11 on 2026-07-20"
+      "configoption4": "0",
+      "configoption5": "982",
+      "_moduleSettings": "vpnhoodstore module settings recorded from the hand-made dev product #11 on 2026-07-20. configoption4 = Token Delivery Method (0 = Normal, 1 = CSV), configoption5 = Access Token Group — the group moved from slot 4 to 5 when the delivery-method field was added."
     }
   ],
 
@@ -51,9 +53,8 @@
   "addons": [
     {
       "module": "vpnhoodpartnerhub",
-      "_comment": "Activation state + config recorded from the admin-saved setup of 2026-07-19. version must match the module's addon config.",
+      "_comment": "Activation state + config recorded from the admin-saved setup of 2026-07-19. 'version' is deliberately NOT listed: WHMCS owns that row, and the module version now changes on every release (see VERSION + scripts/set-version.sh), so pinning it here would make skeleton.php rewrite it back on every run.",
       "settings": {
-        "version": "1.0.0",
         "access": "1",
         "RequireIpAllowlist": "",
         "DefaultCurrency": "USD",
