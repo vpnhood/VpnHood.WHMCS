@@ -45,7 +45,7 @@ Provisions VpnHood access tokens directly against the access server. Core pieces
 ### `modules/addons/vpnhoodconfig/` (addon)
 Global settings store (API Key, Project ID, reseller restriction settings) in
 `tbladdonmodules`. Also drives the product-visibility hook
-`includes/hooks/vpnhoodstore-hidden-reseller-products.php`.
+`includes/hooks/vpnhoodstore-restrict-user-group-products.php`.
 
 ### `modules/addons/vpnhoodpartnerhub/` (addon) — wholesale gateway
 Turns our WHMCS into a partner-scoped wholesale API. **It adds only partner management +
