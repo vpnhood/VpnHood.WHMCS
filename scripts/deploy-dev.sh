@@ -62,11 +62,30 @@ deploy_dir() {
 
 # Copy files under $src/$rel into $WEBROOT/$rel without deleting anything
 # already there (used for includes/hooks, which is shared with other modules).
+#
+# Because nothing is ever deleted, a hook file RENAMED in the repo leaves its old
+# copy behind on the server. WHMCS includes every file in includes/hooks, so two
+# files declaring the same function is an instant site-wide fatal ("Cannot
+# redeclare ..."), which is exactly how this dev box went down. We can't just
+# delete unknown files — the directory is shared with hooks this repo doesn't own
+# — so detect the actual hazard instead: the same function name declared twice.
 overlay_dir() {
-  local src="$1" rel="$2"
+  local src="$1" rel="$2" dupes
   [ -d "$src/$rel" ] || { echo "!! source missing: $src/$rel" >&2; exit 1; }
   echo "-> $rel (overlay)"
   tar -C "$src" -cf - "$rel" | "${SSH[@]}" "tar -C '$WEBROOT' -xf -"
+
+  dupes="$("${SSH[@]}" "cd '$WEBROOT/$rel' && \
+    grep -hoE '^[[:space:]]*function[[:space:]]+[A-Za-z_][A-Za-z0-9_]*' *.php 2>/dev/null \
+    | sed 's/.*function[[:space:]]*//' | LC_ALL=C sort | uniq -d")"
+  if [ -n "$dupes" ]; then
+    echo "!! DUPLICATE FUNCTION DECLARATIONS in $rel — this fatals the whole site:" >&2
+    printf '     %s\n' $dupes >&2
+    echo "   Usually a renamed hook whose old copy is still on the server. Remove the stale file." >&2
+    FAIL=1
+  else
+    echo "   no duplicate hook functions: $rel"
+  fi
 }
 
 # Compare an md5 manifest of local vs deployed files. (`sed 's/ \*/  /'`
@@ -105,13 +124,24 @@ deploy_hub() {
   for d in "${dirs[@]}"; do verify_dir "$REPO_ROOT" "$d"; lint_dir "$d"; done
   lint_dir includes/hooks
 
-  # Smoke check: the Hub API must answer (an auth error proves it boots).
-  local body
-  body="$("${SSH[@]}" "curl -sk -m 30 -o - -X POST '$SITE_URL/modules/addons/vpnhoodpartnerhub/api.php' -d 'action=getBalance'")"
-  if echo "$body" | grep -qi '"success" *: *false\|error'; then
-    echo "   hub api answers: $body"
+  # Smoke check: the Hub API must answer with its OWN JSON envelope (an auth error
+  # proves it boots). Matching a bare 'error' substring is not enough — a PHP fatal
+  # renders an HTML page that also contains "error", which is how a site-wide 500
+  # once passed this check and printed "Deploy OK". Require the JSON shape *and* a
+  # sane status code.
+  local resp code body
+  resp="$("${SSH[@]}" "curl -sk -m 30 -w '\n%{http_code}' -X POST '$SITE_URL/modules/addons/vpnhoodpartnerhub/api.php' -d 'action=getBalance'")"
+  code="$(printf '%s' "$resp" | tail -n1)"
+  body="$(printf '%s' "$resp" | sed '$d')"
+  if [ "$code" -ge 500 ] 2>/dev/null; then
+    echo "!! HUB API SMOKE CHECK FAILED (HTTP $code) — the site is erroring:" >&2
+    echo "$body" | head -c 400 >&2; echo >&2
+    FAIL=1
+  elif printf '%s' "$body" | grep -q '"success"[[:space:]]*:[[:space:]]*false'; then
+    echo "   hub api answers (HTTP $code): $body"
   else
-    echo "!! HUB API SMOKE CHECK FAILED, response: $body" >&2
+    echo "!! HUB API SMOKE CHECK FAILED — not the Hub's JSON envelope (HTTP $code):" >&2
+    echo "$body" | head -c 400 >&2; echo >&2
     FAIL=1
   fi
 }

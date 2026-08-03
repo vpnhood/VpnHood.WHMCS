@@ -184,6 +184,7 @@ function applySpec(PDO $db, array $spec, array &$report): void {
                 'servertype' => $p['servertype'], 'welcomeemail' => $p['welcomeemail'] ?? 0,
                 'configoption1' => $p['configoption1'] ?? '', 'configoption2' => $p['configoption2'] ?? '',
                 'configoption3' => $p['configoption3'] ?? '', 'configoption4' => $p['configoption4'] ?? '',
+                'configoption5' => $p['configoption5'] ?? '',
                 'hidden' => 0, 'retired' => 0, 'created_at' => date('Y-m-d H:i:s'),
             ]);
             $report['created'][] = "product '{$p['slug']}' (#$pid, {$p['paytype']}, {$p['price']} USD)";

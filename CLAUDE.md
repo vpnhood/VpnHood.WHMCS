@@ -31,8 +31,12 @@ when you change architecture, the DB schema, or the API.
 - **Hub API is a cross-repo contract.** If you change the action set or payloads, update the
   matching docs in the **VpnHood.WHMCS.Partner** repo in the same change, or the connector breaks.
 - **Folder naming:** lowercase letters/numbers only (no underscores/spaces).
-- **No build/lint/test tooling** is configured here (no PHP CLI in this environment). Verify
-  on a live WHMCS — see the verification notes in `docs/ARCHITECTURE.md` and each README.
+- **Never hand-edit a module's version.** The root `VERSION` file is the single source of
+  truth; `scripts/set-version.sh` stamps it into every module. CI bumps it on every push to
+  main — see "Versioning & releases" in `docs/ARCHITECTURE.md`.
+- **No build/lint/test tooling** is configured here (no PHP CLI in this environment). The only
+  CI is `.github/workflows/release.yml`, which versions and tags — it does not build or test.
+  Verify on a live WHMCS — see the verification notes in `docs/ARCHITECTURE.md` and each README.
 
 ## Production vs. dev/test layout
 
@@ -40,6 +44,8 @@ Production code (what gets deployed to a WHMCS) lives ONLY under `modules/` and
 `includes/`. Everything for development and testing stays in its own folder — never
 mix test/dev files into the production tree:
 
+- `VERSION` + `scripts/set-version.sh` — the repo version and the script that stamps it into
+  every module. `.github/workflows/release.yml` bumps, tags and releases on push to main.
 - `scripts/` — dev tooling. `scripts/deploy-dev.sh [hub|partner|all]` publishes the
   modules to the dev WHMCS (staged upload + md5 verify + server-side `php -l` + API
   smoke check). It deploys only `modules/` and `includes/hooks`, so test files can
