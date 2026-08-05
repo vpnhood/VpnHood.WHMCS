@@ -1,0 +1,389 @@
+# Cuts a release of the hub WHMCS package: works out the next version, writes it into
+# every module, commits and tags that, builds the zip that installs on the hub WHMCS
+# (and bundles the vpnhoodiap module VERBATIM from its own pinned release), and
+# publishes it as a GitHub release.
+#
+# Triggered by hand (Actions -> Release -> Run workflow). Nothing is released on push —
+# a release is always a deliberate act.
+#
+# The versioning philosophy is documented in VpnHood.WHMCS.Partner's release.yml and
+# applies unchanged: ./VERSION in the repo is the source of truth, this workflow is the
+# only thing that edits it, and the tag mirrors it — the number in the files is
+# functional (WHMCS compares each addon's _config() version to decide _upgrade()).
+name: Release
+
+run-name: >-
+  ${{ inputs.republish && 'Republish' || 'Release' }}
+  ${{ inputs.version != '' && inputs.version || (inputs.republish && 'the current version' || format('({0} bump)', inputs.bump)) }}
+  ${{ inputs.draft && '[draft]' || '' }}
+
+on:
+  workflow_dispatch:
+    inputs:
+      bump:
+        description: "Which part of ./VERSION to increment before releasing. 'none' releases it as committed. minor/major are your call — nothing can infer them from the diff."
+        required: true
+        default: patch
+        type: choice
+        options: [patch, minor, major, none]
+      version:
+        description: "Exact version to release (MAJOR.MINOR.PATCH[-prerelease]). Overrides 'bump'. Leave empty unless you need a specific number."
+        required: false
+        type: string
+      republish:
+        description: "Rebuild and replace an already-published release, keeping its version. Ignores 'bump'. Only allowed when nothing that ships changed since the tag."
+        required: false
+        type: boolean
+        default: false
+      draft:
+        description: "Publish as a draft — the release is created but stays invisible until you press Publish."
+        required: false
+        type: boolean
+        default: false
+      prerelease:
+        description: "Mark the release as a pre-release."
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+env:
+  ASSET_NAME: vpnhoodhub.zip
+
+jobs:
+  release:
+    name: Build and publish
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Refuse to release from anything but a branch
+        run: |
+          set -euo pipefail
+          if [ "${{ github.ref_type }}" != "branch" ]; then
+            echo "::error::the version bump has to be committed somewhere — run this from a branch, not ${{ github.ref_type }} ${{ github.ref_name }}"
+            exit 1
+          fi
+
+      - name: Configure the committer identity
+        run: |
+          set -euo pipefail
+          git config user.name  'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+
+      - name: Work out the next version
+        id: v
+        env:
+          INPUT_VERSION: ${{ inputs.version }}
+          BUMP: ${{ inputs.bump }}
+          REPUBLISH: ${{ inputs.republish }}
+          SEMVER: '^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$'
+        run: |
+          set -euo pipefail
+
+          bash scripts/set-version.sh --check
+
+          DECLARED="$(tr -d ' \t\r\n' < VERSION)"
+
+          git fetch --tags --force --quiet origin
+          LATEST="$(git tag --list 'v*' --sort=-v:refname | head -n1)"
+
+          if [ -n "$INPUT_VERSION" ]; then
+            NEXT="$INPUT_VERSION"
+            BASIS="explicit input"
+          elif [ "$REPUBLISH" = "true" ]; then
+            NEXT="$DECLARED"
+            BASIS="./VERSION — republishing"
+          elif [ -z "$LATEST" ]; then
+            NEXT="$DECLARED"
+            BASIS="./VERSION — first release, nothing to bump from"
+          elif [ "$BUMP" = "none" ]; then
+            NEXT="$DECLARED"
+            BASIS="./VERSION as committed"
+          else
+            CORE="${DECLARED%%-*}"
+            IFS='.' read -r MAJOR MINOR PATCH <<EOF
+          $CORE
+          EOF
+            case "$BUMP" in
+              major) MAJOR=$((MAJOR + 1)); MINOR=0; PATCH=0 ;;
+              minor) MINOR=$((MINOR + 1)); PATCH=0 ;;
+              patch)
+                if [ "$DECLARED" = "$CORE" ]; then PATCH=$((PATCH + 1)); fi
+                ;;
+              *) echo "::error::unknown bump '$BUMP'"; exit 1 ;;
+            esac
+            NEXT="$MAJOR.$MINOR.$PATCH"
+            BASIS="$BUMP bump of $DECLARED"
+          fi
+
+          if ! printf '%s' "$NEXT" | grep -qE "$SEMVER"; then
+            echo "::error::'$NEXT' is not MAJOR.MINOR.PATCH[-prerelease]"
+            exit 1
+          fi
+
+          TAG_EXISTS=false
+          if git rev-parse -q --verify "refs/tags/v$NEXT" >/dev/null; then
+            if [ "$REPUBLISH" != "true" ]; then
+              echo "::error::v$NEXT is already released — bump instead of overwriting it"
+              exit 1
+            fi
+            TAGGED="$(git rev-parse "refs/tags/v$NEXT^{commit}")"
+            HEAD_SHA="$(git rev-parse HEAD)"
+            if ! git diff --quiet "$TAGGED" "$HEAD_SHA" -- modules includes VERSION IAP_VERSION; then
+              echo "::error::the shipping payload changed since v$NEXT was tagged — republishing would put different code under the same version. Bump instead."
+              git diff --stat "$TAGGED" "$HEAD_SHA" -- modules includes VERSION IAP_VERSION
+              exit 1
+            fi
+            TAG_EXISTS=true
+          fi
+
+          if [ -n "$LATEST" ]; then
+            HIGHEST="$(printf '%s\n%s\n' "${LATEST#v}" "$NEXT" | sort -V | tail -n1)"
+            if [ "$HIGHEST" != "$NEXT" ]; then
+              echo "::warning::$NEXT is not newer than the last tag $LATEST — releasing anyway"
+            fi
+          fi
+
+          echo "Last tagged: ${LATEST:-none}"
+          echo "Releasing:   $NEXT  ($BASIS)"
+
+          bash scripts/set-version.sh "$NEXT"
+
+          PRE=${{ inputs.prerelease }}
+          case "$NEXT" in *-*) PRE=true ;; esac
+
+          {
+            echo "version=$NEXT"
+            echo "tag=v$NEXT"
+            echo "asset=$ASSET_NAME"
+            echo "previous=$LATEST"
+            echo "prerelease=$PRE"
+            echo "tag_exists=$TAG_EXISTS"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Lint the PHP that ships in the zip
+        run: |
+          set -euo pipefail
+          if ! command -v php >/dev/null 2>&1; then
+            echo "::warning::no PHP on the runner — skipping the syntax check"
+            exit 0
+          fi
+          php -v | head -n1
+          find modules includes -name '*.php' -print0 | xargs -0 -r -n1 php -l
+
+      - name: Commit the version bump
+        env:
+          TAG: ${{ steps.v.outputs.tag }}
+          BRANCH: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          if git diff --quiet; then
+            echo "Every module already declared ${{ steps.v.outputs.version }} — nothing to commit."
+            exit 0
+          fi
+
+          git add VERSION modules
+          git commit -m "Release $TAG"
+
+          for attempt in 1 2 3; do
+            if git push origin "HEAD:$BRANCH"; then
+              exit 0
+            fi
+            if [ "$attempt" = "3" ]; then
+              echo "::error::could not push the version bump to $BRANCH"
+              exit 1
+            fi
+            echo "Push rejected — rebasing onto origin/$BRANCH and retrying."
+            git fetch --quiet origin "$BRANCH"
+            git rebase "origin/$BRANCH"
+          done
+
+      - name: Tag the release commit
+        if: steps.v.outputs.tag_exists != 'true'
+        env:
+          TAG: ${{ steps.v.outputs.tag }}
+        run: |
+          set -euo pipefail
+          git tag -a "$TAG" -m "VpnHood! Hub WHMCS $TAG"
+          git push origin "refs/tags/$TAG"
+
+      - name: Build the hub zip
+        env:
+          ASSET: ${{ steps.v.outputs.asset }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          STAGE="$RUNNER_TEMP/pkg"
+          rm -rf "$STAGE" && mkdir -p "$STAGE"
+
+          # The zip extracts at the root of the hub WHMCS: modules/ + includes/hooks.
+          # Repo-only material (docs/, scripts/, tests/, .github/) is deliberately absent.
+          cp -R modules "$STAGE/modules"
+          cp -R includes "$STAGE/includes"
+
+          # module READMEs are repo docs, not install payload
+          find "$STAGE" -name 'README.md' -delete
+
+          # Bundle the vpnhoodiap module VERBATIM from its own pinned release. Its
+          # version stream is deliberately independent (IAP_VERSION is the pin): WHMCS
+          # keys _upgrade() on the version inside vpnhoodiap_config(), so the same code
+          # must carry the same number in this package, the partner package, and
+          # standalone installs. Never restamp it here.
+          IAP_PIN="$(tr -d ' \t\r\n' < IAP_VERSION)"
+          echo "Bundling vpnhoodiap v$IAP_PIN"
+          gh release download "v$IAP_PIN" --repo vpnhood/VpnHood.WHMCS.Iap \
+            --pattern 'vpnhoodiap.zip' --dir "$RUNNER_TEMP"
+          unzip -q -o "$RUNNER_TEMP/vpnhoodiap.zip" -d "$STAGE"
+
+          find "$STAGE" \( -name '*.bak' -o -name '.DS_Store' -o -name 'Thumbs.db' \) -delete
+
+          # Deterministic archive: date everything from the last commit that touched the
+          # payload (IAP_VERSION included — bumping the bundled module IS a payload
+          # change), sort the input, strip uid/gid.
+          SOURCE_DATE="$(git log -1 --format=%cI -- modules includes VERSION IAP_VERSION)"
+          [ -n "$SOURCE_DATE" ] || { echo "::error::could not date the payload"; exit 1; }
+          echo "Payload last changed $SOURCE_DATE — stamping the archive with it."
+          find "$STAGE" -exec touch -d "$SOURCE_DATE" {} +
+
+          ( cd "$STAGE" && find modules includes | LC_ALL=C sort | zip -q -X "$GITHUB_WORKSPACE/$ASSET" -@ )
+
+          sha256sum "$ASSET" > "$ASSET.sha256"
+          ls -lh "$ASSET"
+
+      - name: Verify the zip
+        env:
+          VERSION: ${{ steps.v.outputs.version }}
+          ASSET: ${{ steps.v.outputs.asset }}
+        run: |
+          set -euo pipefail
+          unzip -Z1 "$ASSET"
+
+          for f in \
+            modules/servers/vpnhoodstore/vpnhoodstore.php \
+            modules/servers/vpnhoodstore/whmcs.json \
+            modules/servers/vpnhoodstore/lib/ApiService.php \
+            modules/servers/vpnhoodstore/lib/Helper.php \
+            modules/addons/vpnhoodconfig/vpnhoodconfig.php \
+            modules/addons/vpnhoodpartnerhub/vpnhoodpartnerhub.php \
+            modules/addons/vpnhoodpartnerhub/api.php \
+            includes/hooks/vpnhoodcustomhook.php \
+            includes/hooks/vpnhoodstore-restrict-user-group-products.php \
+            modules/addons/vpnhoodiap/vpnhoodiap.php \
+            modules/addons/vpnhoodiap/api.php \
+            modules/addons/vpnhoodiap/webhook.php \
+            modules/gateways/vpnhoodiappay.php \
+            includes/hooks/vpnhoodiap-suppress-emails.php \
+            includes/hooks/vpnhoodiap-cron.php
+          do
+            unzip -Z1 "$ASSET" | grep -Fxq "$f" || { echo "::error::$f missing from $ASSET"; exit 1; }
+          done
+
+          # Nothing outside modules/ and includes/ — the zip lands in the WHMCS root.
+          if unzip -Z1 "$ASSET" | grep -vE '^(modules|includes)(/|$)' | grep -q .; then
+            echo "::error::$ASSET contains paths outside modules/ and includes/"
+            unzip -Z1 "$ASSET" | grep -vE '^(modules|includes)(/|$)'
+            exit 1
+          fi
+
+          # Every hub module must declare the version being tagged...
+          unzip -p "$ASSET" modules/servers/vpnhoodstore/whmcs.json \
+            | grep -q "\"version\"[[:space:]]*:[[:space:]]*\"$VERSION\"" \
+            || { echo "::error::whmcs.json in the zip is not at $VERSION"; exit 1; }
+          for m in modules/addons/vpnhoodconfig/vpnhoodconfig.php modules/addons/vpnhoodpartnerhub/vpnhoodpartnerhub.php; do
+            unzip -p "$ASSET" "$m" \
+              | grep -q "'version'[[:space:]]*=>[[:space:]]*'$VERSION'" \
+              || { echo "::error::$m in the zip is not at $VERSION"; exit 1; }
+          done
+
+          # ...while the bundled vpnhoodiap carries ITS OWN pinned version, untouched.
+          IAP_PIN="$(tr -d ' \t\r\n' < IAP_VERSION)"
+          unzip -p "$ASSET" modules/addons/vpnhoodiap/vpnhoodiap.php \
+            | grep -q "'version'[[:space:]]*=>[[:space:]]*'$IAP_PIN'" \
+            || { echo "::error::bundled vpnhoodiap is not at the pinned version $IAP_PIN"; exit 1; }
+
+          sha256sum -c "$ASSET.sha256"
+          echo "$ASSET verified."
+
+      - name: Write the release notes
+        id: notes
+        env:
+          VERSION: ${{ steps.v.outputs.version }}
+          ASSET: ${{ steps.v.outputs.asset }}
+        run: |
+          set -euo pipefail
+          SHA="$(cut -d' ' -f1 < "$ASSET.sha256")"
+          IAP_PIN="$(tr -d ' \t\r\n' < IAP_VERSION)"
+          NOTES="$RUNNER_TEMP/notes.md"
+
+          cat > "$NOTES" <<EOF
+          **VpnHood! Hub WHMCS $VERSION** — the hub install package: \`vpnhoodstore\`
+          provisioning, \`vpnhoodconfig\`, the partner hub (\`vpnhoodpartnerhub\`), hooks,
+          and the bundled in-app purchase addon (\`vpnhoodiap\` v$IAP_PIN).
+
+          \`\`\`
+          sha256  $SHA
+          \`\`\`
+          EOF
+
+          echo "path=$NOTES" >> "$GITHUB_OUTPUT"
+          echo "sha=$SHA" >> "$GITHUB_OUTPUT"
+
+      - name: Publish the GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.v.outputs.tag }}
+          ASSET: ${{ steps.v.outputs.asset }}
+          NOTES: ${{ steps.notes.outputs.path }}
+          DRAFT: ${{ inputs.draft }}
+          PRERELEASE: ${{ steps.v.outputs.prerelease }}
+        run: |
+          set -euo pipefail
+
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "Deleting the existing $TAG release to replace it."
+            gh release delete "$TAG" --yes
+          fi
+
+          args=(
+            "$TAG"
+            "$ASSET"
+            "$ASSET.sha256"
+            --title "$TAG"
+            --notes-file "$NOTES"
+            --verify-tag
+          )
+          if [ "$DRAFT" = "true" ]; then args+=(--draft); fi
+          if [ "$PRERELEASE" = "true" ]; then args+=(--prerelease); fi
+          if [ "$DRAFT" != "true" ] && [ "$PRERELEASE" != "true" ]; then args+=(--latest); fi
+          gh release create "${args[@]}"
+
+      - name: Summarise
+        env:
+          TAG: ${{ steps.v.outputs.tag }}
+          ASSET: ${{ steps.v.outputs.asset }}
+          SHA: ${{ steps.notes.outputs.sha }}
+          PREVIOUS: ${{ steps.v.outputs.previous }}
+          REPO: ${{ github.repository }}
+        run: |
+          {
+            echo "## ${{ inputs.republish && 'Republished' || 'Released' }} $TAG"
+            echo
+            echo "| | |"
+            echo "|---|---|"
+            echo "| Previous release | ${PREVIOUS:-none} |"
+            echo "| Asset | \`$ASSET\` |"
+            echo "| sha256 | \`$SHA\` |"
+            echo
+            echo "https://github.com/$REPO/releases/tag/$TAG"
+          } >> "$GITHUB_STEP_SUMMARY"
