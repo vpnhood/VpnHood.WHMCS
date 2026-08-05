@@ -11,7 +11,9 @@
 #            vpnhoodpartnerhub, plus the includes/hooks overlay
 #   partner  the connector module (vpnhoodpartner) from the sibling
 #            VpnHood.WHMCS.Partner repo
-#   all      both
+#   iap      the vpnhoodiap module (addon + gateway + hooks overlay) from the
+#            sibling VpnHood.WHMCS.Iap repo
+#   all      all of the above
 #
 # Each module directory is uploaded to a staging dir on the server and
 # swapped into place, so the live site never serves a half-copied module.
@@ -24,6 +26,7 @@
 #   WHMCS_DEV_WEBROOT   default /home/whmcsdev/web/whmcs-dev.vpnhood.com/public_html
 #   WHMCS_DEV_URL       default https://whmcs-dev.vpnhood.com
 #   PARTNER_REPO        default <Vh root>/VpnHood.WHMCS.Partner
+#   IAP_REPO            default <Vh root>/VpnHood.WHMCS.Iap
 
 set -euo pipefail
 
@@ -33,8 +36,8 @@ VH_ROOT="$(cd "$REPO_ROOT/.." && pwd)"
 
 TARGET="${1:-hub}"
 case "$TARGET" in
-  hub|partner|all) ;;
-  *) echo "Usage: $0 [hub|partner|all]" >&2; exit 2 ;;
+  hub|partner|iap|all) ;;
+  *) echo "Usage: $0 [hub|partner|iap|all]" >&2; exit 2 ;;
 esac
 
 SSH_KEY="${WHMCS_DEV_SSH_KEY:-$VH_ROOT/.user/whmcs/ssh.openssh}"
@@ -42,6 +45,7 @@ SSH_HOST="${WHMCS_DEV_SSH_HOST:-whmcsdev@webhost-ftps.vpnhood.com}"
 WEBROOT="${WHMCS_DEV_WEBROOT:-/home/whmcsdev/web/whmcs-dev.vpnhood.com/public_html}"
 SITE_URL="${WHMCS_DEV_URL:-https://whmcs-dev.vpnhood.com}"
 PARTNER_REPO="${PARTNER_REPO:-$VH_ROOT/VpnHood.WHMCS.Partner}"
+IAP_REPO="${IAP_REPO:-$VH_ROOT/VpnHood.WHMCS.Iap}"
 
 [ -f "$SSH_KEY" ] || { echo "SSH key not found: $SSH_KEY" >&2; exit 1; }
 SSH=(ssh -i "$SSH_KEY" -o BatchMode=yes -o ConnectTimeout=15 "$SSH_HOST")
@@ -144,6 +148,7 @@ deploy_hub() {
     echo "$body" | head -c 400 >&2; echo >&2
     FAIL=1
   fi
+
 }
 
 deploy_partner() {
@@ -157,11 +162,38 @@ deploy_partner() {
   done
 }
 
+deploy_iap() {
+  [ -d "$IAP_REPO" ] || { echo "IAP repo not found: $IAP_REPO" >&2; exit 1; }
+  deploy_dir "$IAP_REPO" modules/addons/vpnhoodiap
+  # hooks and gateways dirs are shared with other modules on the server: overlay, never replace
+  overlay_dir "$IAP_REPO" includes/hooks
+  overlay_dir "$IAP_REPO" modules/gateways
+  verify_dir "$IAP_REPO" modules/addons/vpnhoodiap
+  lint_dir modules/addons/vpnhoodiap
+  lint_dir includes/hooks
+  lint_dir modules/gateways
+
+  # IAP API smoke check: inactive addon must answer its fail-closed 404 JSON; an active
+  # one answers the ping envelope. Anything else (HTML error page, 5xx) is a failure.
+  local resp code body
+  resp="$("${SSH[@]}" "curl -sk -m 30 -w '\n%{http_code}' -X POST '$SITE_URL/modules/addons/vpnhoodiap/api.php' -H 'Content-Type: application/json' -d '{\"action\":\"ping\"}'")"
+  code="$(printf '%s' "$resp" | tail -n1)"
+  body="$(printf '%s' "$resp" | sed '$d')"
+  if { [ "$code" = "404" ] || [ "$code" = "200" ]; } && printf '%s' "$body" | grep -q '"success"'; then
+    echo "   iap api answers (HTTP $code): $body"
+  else
+    echo "!! IAP API SMOKE CHECK FAILED (HTTP $code):" >&2
+    echo "$body" | head -c 400 >&2; echo >&2
+    FAIL=1
+  fi
+}
+
 echo "Deploying '$TARGET' to $SSH_HOST:$WEBROOT"
 case "$TARGET" in
   hub)     deploy_hub ;;
   partner) deploy_partner ;;
-  all)     deploy_hub; deploy_partner ;;
+  iap)     deploy_iap ;;
+  all)     deploy_hub; deploy_partner; deploy_iap ;;
 esac
 
 if [ "$FAIL" -ne 0 ]; then
