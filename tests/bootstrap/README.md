@@ -26,7 +26,7 @@ config pointed at this Hub, the partner-shop products, and the **buyer** client
 connector share the one dev WHMCS; the connector reaches the Hub over HTTPS
 like any external partner would.
 
-Credentials live in `<Vh root>/.user/whmcs/secrets-dev.json` (`partnerApiKey`,
+Credentials live in `<Vh root>/.user/account-dev.vpnhood.com/secrets.json` (`partnerApiKey`,
 `partnerApiSecret`, `testClientPassword` are generated on first run; `adminUser`
 / `adminPassword` are for the e2e admin scripts). The script also regenerates
 `tests/integration/.env`, so `tests/integration/hub-api.test.sh` runs directly
@@ -40,4 +40,4 @@ Notes:
 - Product existence is checked via `tblproducts_slugs` **and** `tblproducts.slug`
   (admin-created products only populate the former).
 - The reseller's credit is only ever topped **up** to the minimum, never reduced.
-- The partner secret hash is re-synced to `secrets-dev.json` if they diverge.
+- The partner secret hash is re-synced to `secrets.json` if they diverge.

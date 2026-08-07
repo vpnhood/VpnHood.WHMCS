@@ -77,7 +77,7 @@
   "partner": {
     "name": "Test Reseller",
     "clientRole": "reseller",
-    "_credentials": "api key/secret live in <Vh root>/.user/whmcs/secrets-dev.json (partnerApiKey / partnerApiSecret), passed to skeleton.php via env",
+    "_credentials": "api key/secret live in <Vh root>/.user/account-dev.vpnhood.com/secrets.json (partnerApiKey / partnerApiSecret), passed to skeleton.php via env",
     "productRefs": [
       { "downstream_ref": "reseller-one-month-premium-code", "billing_cycle_months": 1 },
       { "downstream_ref": "reseller-one-month-premium-code-subscription", "billing_cycle_months": 1 }
