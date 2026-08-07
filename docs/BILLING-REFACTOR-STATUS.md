@@ -101,8 +101,8 @@ contract).
 1. **W0 external setup** (owner-only, blocks the Google live check): Play Console
    service-account grant, Pub/Sub topic + OIDC push subscription → webhook URL,
    SA JSON entered in the addon's Apps tab.
-2. **Google live e2e**: real idToken → `auth.token`, internal-testing purchase →
-   `purchase.verify` returns the code, RTDN renewal/cancel/refund cycles, Play
+2. **Google live e2e**: real idToken → `POST /auth/sessions`, internal-testing purchase →
+   `POST /billing/purchases` returns the code, RTDN renewal/cancel/refund cycles, Play
    Console test notification.
 3. **Build `VpnHoodStoreKit.xcframework` on a Mac** (`swift/build-xcframework.sh`)
    and commit it (conditional NativeReference picks it up).
