@@ -4,10 +4,10 @@
 #
 # Idempotent; call it at the start of any test run. It:
 #   1. ensures partnerApiKey / partnerApiSecret / testClientPassword exist in
-#      <Vh root>/.user/whmcs/secrets-dev.json (generates them on first run)
+#      <Vh root>/.user/account-dev.vpnhood.com/secrets.json (generates them on first run)
 #   2. uploads skeleton.php + fixtures.json to the dev box and runs it there
 #      (direct-DB, create-if-missing — see fixtures.json for what it ensures)
-#   3. regenerates tests/integration/.env from secrets-dev.json
+#   3. regenerates tests/integration/.env from secrets.json
 #
 # Env overrides: WHMCS_DEV_SSH_KEY, WHMCS_DEV_SSH_HOST, WHMCS_DEV_URL
 
@@ -17,10 +17,10 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 VH_ROOT="$(cd "$REPO_ROOT/.." && pwd)"
 
-SSH_KEY="${WHMCS_DEV_SSH_KEY:-$VH_ROOT/.user/whmcs/ssh.openssh}"
+SSH_KEY="${WHMCS_DEV_SSH_KEY:-$VH_ROOT/.user/account-dev.vpnhood.com/ssh.openssh}"
 SSH_HOST="${WHMCS_DEV_SSH_HOST:-whmcsdev@webhost-ftps.vpnhood.com}"
 SITE_URL="${WHMCS_DEV_URL:-https://whmcs-dev.vpnhood.com}"
-SECRETS="$VH_ROOT/.user/whmcs/secrets-dev.json"
+SECRETS="$VH_ROOT/.user/account-dev.vpnhood.com/secrets.json"
 
 [ -f "$SSH_KEY" ] || { echo "SSH key not found: $SSH_KEY" >&2; exit 1; }
 [ -f "$SECRETS" ] || { echo "secrets file not found: $SECRETS" >&2; exit 1; }
@@ -30,7 +30,7 @@ SSH=(ssh -i "$SSH_KEY" -o BatchMode=yes -o ConnectTimeout=15 "$SSH_HOST")
 SECRETS_NODE="$SECRETS"
 command -v cygpath >/dev/null 2>&1 && SECRETS_NODE="$(cygpath -m "$SECRETS")"
 
-echo "== Ensuring test credentials in secrets-dev.json"
+echo "== Ensuring test credentials in secrets.json"
 SECRETS_PATH="$SECRETS_NODE" node <<'EOF'
 const fs = require('fs'), crypto = require('crypto');
 const p = process.env.SECRETS_PATH;

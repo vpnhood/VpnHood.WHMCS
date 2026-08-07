@@ -9,7 +9,7 @@
 // It does NOT save — the browser stays open so you can review and click
 // Save Changes yourself. Ctrl+C in the terminal closes it.
 //
-// Credentials: <Vh root>/.user/whmcs/secrets-dev.json
+// Credentials: <Vh root>/.user/account-dev.vpnhood.com/secrets.json
 //   { "adminUser": "...", "adminPassword": "..." }
 // (or env WHMCS_ADMIN_USER / WHMCS_ADMIN_PASSWORD).
 //
@@ -23,7 +23,7 @@ import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
-const SECRETS_PATH = join(HERE, '..', '..', '..', '.user', 'whmcs', 'secrets-dev.json');
+const SECRETS_PATH = join(HERE, '..', '..', '..', '.user', 'account-dev.vpnhood.com', 'secrets.json');
 
 const BASE_URL = (process.env.WHMCS_DEV_URL ?? 'https://whmcs-dev.vpnhood.com').replace(/\/$/, '');
 const ORDER_GATEWAY = process.env.HUB_ORDER_GATEWAY ?? 'banktransfer';

@@ -6,7 +6,7 @@ Five separate scripts, one per lifecycle action, all driving the real buyer
 journey on the dev WHMCS through `localAPI()` and the core `applyCredit()` —
 never a raw INSERT/UPDATE against orders, invoices, or hosting. Each uploads
 its `.test.php` (plus the shared `lib/common.php`) over SSH and runs it on the
-dev box; each needs SSH + admin credentials (`secrets-dev.json`).
+dev box; each needs SSH + admin credentials (`secrets.json`).
 
 **`purchase-order.test.sh`** — the only script that cleans up, and the only
 entry point that creates a new service. Runs `tests/bootstrap/init-skeleton.sh`

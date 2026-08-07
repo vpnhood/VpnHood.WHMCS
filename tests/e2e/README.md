@@ -14,7 +14,7 @@ cd tests/e2e
 npm install
 ```
 
-Admin credentials go in `<Vh root>/.user/whmcs/secrets-dev.json` (outside the repo,
+Admin credentials go in `<Vh root>/.user/account-dev.vpnhood.com/secrets.json` (outside the repo,
 next to the SSH key):
 
 ```json

@@ -273,7 +273,7 @@ function applySpec(PDO $db, array $spec, array &$report): void {
                     if (!password_verify($pass, $u['password'])) {
                         $db->prepare('UPDATE tblusers SET password=? WHERE id=?')
                            ->execute([password_hash($pass, PASSWORD_DEFAULT), $uid]);
-                        $report['updated'][] = "$role user login password re-synced to secrets-dev.json";
+                        $report['updated'][] = "$role user login password re-synced to secrets.json";
                     }
                 }
                 $uc = cols($db, 'tblusers_clients');
@@ -340,7 +340,7 @@ function applySpec(PDO $db, array $spec, array &$report): void {
                 if (!password_verify($apiSecret, $partner['api_secret_hash'])) {
                     $db->prepare('UPDATE mod_vpnhood_partners SET api_secret_hash=? WHERE id=?')
                        ->execute([password_hash($apiSecret, PASSWORD_DEFAULT), $partnerId]);
-                    $report['updated'][] = 'hub partner secret re-hashed to match secrets-dev.json';
+                    $report['updated'][] = 'hub partner secret re-hashed to match secrets.json';
                 }
                 if ((int)$partner['client_id'] !== $resellerId) {
                     $report['warnings'][] = "hub partner #$partnerId is linked to client #{$partner['client_id']}, spec expects #$resellerId — left unchanged";
