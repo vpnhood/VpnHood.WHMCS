@@ -173,13 +173,15 @@ deploy_iap() {
   lint_dir includes/hooks
   lint_dir modules/gateways
 
-  # IAP API smoke check: inactive addon must answer its fail-closed 404 JSON; an active
-  # one answers the ping envelope. Anything else (HTML error page, 5xx) is a failure.
+  # IAP API smoke check: an active addon answers GET /system/status; an inactive one
+  # answers its fail-closed 404 problem+json. Anything else (HTML error page, 5xx)
+  # is a failure. The path also proves PATH_INFO routing survives the web server.
   local resp code body
-  resp="$("${SSH[@]}" "curl -sk -m 30 -w '\n%{http_code}' -X POST '$SITE_URL/modules/addons/vpnhoodiap/api.php' -H 'Content-Type: application/json' -d '{\"action\":\"ping\"}'")"
+  resp="$("${SSH[@]}" "curl -sk -m 30 -w '\n%{http_code}' '$SITE_URL/modules/addons/vpnhoodiap/api.php/system/status'")"
   code="$(printf '%s' "$resp" | tail -n1)"
   body="$(printf '%s' "$resp" | sed '$d')"
-  if { [ "$code" = "404" ] || [ "$code" = "200" ]; } && printf '%s' "$body" | grep -q '"success"'; then
+  if { [ "$code" = "200" ] && printf '%s' "$body" | grep -q '"status":"ok"'; } ||
+     { [ "$code" = "404" ] && printf '%s' "$body" | grep -q '"code":"not_found"'; }; then
     echo "   iap api answers (HTTP $code): $body"
   else
     echo "!! IAP API SMOKE CHECK FAILED (HTTP $code):" >&2
