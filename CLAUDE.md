@@ -34,6 +34,10 @@ when you change architecture, the DB schema, or the API.
 - **Never hand-edit a module's version.** The root `VERSION` file is the single source of
   truth; `scripts/set-version.sh` stamps it into every module. CI bumps it on every push to
   main — see "Versioning & releases" in `docs/ARCHITECTURE.md`.
+- **Bump the version for ANY change to a module's files** — templates, hooks, a comment —
+  not only schema or DB changes. WHMCS decides what to reinstall by comparing the stamped
+  version, so an edit that ships under an unchanged number is an edit that silently does
+  not reach the install.
 - **No build/lint/test tooling** is configured here (no PHP CLI in this environment). The only
   CI is `.github/workflows/release.yml`, which versions and tags — it does not build or test.
   Verify on a live WHMCS — see the verification notes in `docs/ARCHITECTURE.md` and each README.
