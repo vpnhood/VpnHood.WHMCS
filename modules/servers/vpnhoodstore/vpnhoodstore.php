@@ -227,5 +227,62 @@ function vpnhoodstore_ClientArea(array $params): array {
         }
     }
 
-    return array('templatefile' => $isCsvTokenDelivery ? 'clientarea-reseller.tpl' : 'clientarea.tpl');
+    return array(
+        'templatefile' => $isCsvTokenDelivery ? 'clientarea-reseller.tpl' : 'clientarea.tpl',
+        'templateVariables' => vpnhoodstore_storeBadgeVars($params),
+    );
+}
+
+/**
+ * Store-purchase badge for the client area.
+ *
+ * A service sold through an app store carries a 'purchasedVia' service property,
+ * written by the vpnhoodiap addon at provisioning time (the property NAME is the
+ * whole contract between the two — this module never calls into that addon, and
+ * works unchanged on installs where it is not present). Everything else on the
+ * install has no such property, gets an empty label, and renders no badge.
+ *
+ * It matters because the money never moved here: the customer paid Google/Apple/
+ * Microsoft, renewals are charged there, and cancellation or refund can only be
+ * done there. Saying so on the page is what prevents a ticket asking us to refund
+ * a charge we never took.
+ */
+function vpnhoodstore_storeBadgeVars(array $params): array {
+    try {
+        $store = (string) $params['model']->serviceProperties->get('purchasedVia');
+    } catch (Throwable $e) {
+        $store = '';
+    }
+
+    return array(
+        'purchasedVia'      => $store,
+        'purchasedViaLabel' => vpnhoodstore_storeLabel($store),
+    );
+}
+
+/** Store id → the name a customer knows it by. '' when this was not a store purchase. */
+function vpnhoodstore_storeLabel(string $store): string {
+    return match ($store) {
+        'googleplay' => 'Google Play',
+        'appstore'   => 'the Apple App Store',
+        'microsoft'  => 'the Microsoft Store',
+        default      => '',
+    };
+}
+
+/**
+ * Admin service page: show which store sold this service, so an admin reading the
+ * order sees what the customer sees without opening the IAP addon. Read-only — the
+ * purchase record owns this value, it is not editable here.
+ */
+function vpnhoodstore_AdminServicesTabFields(array $params): array {
+    $label = vpnhoodstore_storeBadgeVars($params)['purchasedViaLabel'];
+    if ($label === '') {
+        return array();
+    }
+
+    return array(
+        'Purchased via' => htmlspecialchars($label, ENT_QUOTES, 'UTF-8')
+            . ' <em>(billed by the store — cancellations and refunds happen there)</em>',
+    );
 }
