@@ -30,6 +30,12 @@
 
 set -euo pipefail
 
+# macOS bsdtar writes AppleDouble ._* metadata entries into the stream; the
+# server's GNU tar extracts them as real files, polluting the webroot and
+# failing the md5 manifest. This env var tells bsdtar to omit them (no-op on
+# Linux/Git Bash).
+export COPYFILE_DISABLE=1
+
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 VH_ROOT="$(cd "$REPO_ROOT/.." && pwd)"
