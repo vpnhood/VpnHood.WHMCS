@@ -20,6 +20,32 @@ if (!defined('WHMCS')) {
 
 use WHMCS\Database\Capsule;
 
+/**
+ * Collapse free alias tricks so one mailbox yields one hash: a "+tag" suffix is a
+ * discardable alias on every major provider, and Gmail additionally ignores dots
+ * in the local part and serves googlemail.com as the same mailbox. Without this,
+ * a single Gmail account mints unlimited distinct addresses that would each look
+ * "never refunded before". Any future reader checking against the table must
+ * apply this same normalization before hashing.
+ */
+function vpnhood_refund_memory_core_email(string $email): string
+{
+    $atPos = strrpos($email, '@');
+    if ($atPos === false) {
+        return $email;
+    }
+
+    $local = explode('+', substr($email, 0, $atPos), 2)[0];
+    $domain = substr($email, $atPos + 1);
+    if ($domain === 'googlemail.com') {
+        $domain = 'gmail.com';
+    }
+    if ($domain === 'gmail.com') {
+        $local = str_replace('.', '', $local);
+    }
+    return $local . '@' . $domain;
+}
+
 add_hook('InvoiceRefunded', 1, function (array $vars) {
     try {
         $invoiceId = (int) ($vars['invoiceid'] ?? 0);
@@ -54,7 +80,7 @@ add_hook('InvoiceRefunded', 1, function (array $vars) {
         }
 
         Capsule::table('mod_vpnhood_refund_memory')->insertOrIgnore([
-            'email_hash' => hash('sha256', $email),
+            'email_hash' => hash('sha256', vpnhood_refund_memory_core_email($email)),
             'invoice_id' => $invoiceId,
             'created_at' => date('Y-m-d H:i:s'),
         ]);
