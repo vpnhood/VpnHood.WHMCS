@@ -19,6 +19,12 @@
  *    before?" but can never be turned back into the person. Retention is capped
  *    at 24 months, pruned opportunistically on every new entry.
  *
+ * RECORD-ONLY at this time: this hook writes, nothing reads. A repeat refund is
+ * not blocked and staff are shown no warning — it just adds another row. Whether
+ * to refund stays a human decision made on the customer's ticket. The lookup side
+ * (an admin-facing "this hash matches N earlier refunds" notice) is deliberately
+ * deferred; until it exists the table is evidence being collected, not a control.
+ *
  * Honest limit: a new email address defeats it. It is a speed bump against
  * repeat refund abuse, not a wall — accepted for web sales.
  */
