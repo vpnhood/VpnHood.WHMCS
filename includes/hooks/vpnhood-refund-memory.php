@@ -14,9 +14,10 @@
  *    stores decide their own refunds and run their own abuse detection. Store
  *    refunds arrive on invoices paid by the `vpnhoodiap` gateway, so gateway is
  *    the filter.
- *  - A hash, not the email: sha256 of the lowercased address. It can answer
- *    "seen before?" but can never be turned back into the person. Retention is
- *    capped at 24 months, pruned opportunistically on every new entry.
+ *  - A hash, not the email: sha256 of the lowercased CORE address (alias tricks
+ *    collapsed, see vpnhood_refund_memory_core_email). It can answer "seen
+ *    before?" but can never be turned back into the person. Retention is capped
+ *    at 24 months, pruned opportunistically on every new entry.
  *
  * Honest limit: a new email address defeats it. It is a speed bump against
  * repeat refund abuse, not a wall — accepted for web sales.
@@ -27,6 +28,32 @@ if (!defined('WHMCS')) {
 }
 
 use WHMCS\Database\Capsule;
+
+/**
+ * Collapse free alias tricks so one mailbox yields one hash: a "+tag" suffix is a
+ * discardable alias on every major provider, and Gmail additionally ignores dots
+ * in the local part and serves googlemail.com as the same mailbox. Without this,
+ * a single Gmail account mints unlimited distinct addresses that would each look
+ * "never refunded before". Any future reader checking against the table must
+ * apply this same normalization before hashing.
+ */
+function vpnhood_refund_memory_core_email(string $email): string
+{
+    $atPos = strrpos($email, '@');
+    if ($atPos === false) {
+        return $email;
+    }
+
+    $local = explode('+', substr($email, 0, $atPos), 2)[0];
+    $domain = substr($email, $atPos + 1);
+    if ($domain === 'googlemail.com') {
+        $domain = 'gmail.com';
+    }
+    if ($domain === 'gmail.com') {
+        $local = str_replace('.', '', $local);
+    }
+    return $local . '@' . $domain;
+}
 
 add_hook('InvoiceRefunded', 1, function (array $vars) {
     try {
@@ -62,7 +89,7 @@ add_hook('InvoiceRefunded', 1, function (array $vars) {
         }
 
         Capsule::table('mod_vpnhood_refund_memory')->insertOrIgnore([
-            'email_hash' => hash('sha256', $email),
+            'email_hash' => hash('sha256', vpnhood_refund_memory_core_email($email)),
             'invoice_id' => $invoiceId,
             'created_at' => date('Y-m-d H:i:s'),
         ]);
