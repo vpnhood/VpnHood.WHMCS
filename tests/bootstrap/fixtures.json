@@ -41,6 +41,22 @@
       "configoption4": "0",
       "configoption5": "982",
       "_moduleSettings": "vpnhoodstore module settings recorded from the hand-made dev product #11 on 2026-07-20. configoption4 = Token Delivery Method (0 = Normal, 1 = CSV), configoption5 = Access Token Group — the group moved from slot 4 to 5 when the delivery-method field was added."
+    },
+    {
+      "slug": "reseller-bulk-csv-premium-code",
+      "name": "Reseller - Bulk CSV Premium Code",
+      "paytype": "onetime",
+      "price": "2.00",
+      "type": "other",
+      "servertype": "vpnhoodstore",
+      "autosetup": "payment",
+      "welcomeemail": 18,
+      "configoption1": "3a04da83-a4f5-4750-8c16-dce8efb259f5",
+      "configoption2": "VpnHood Official",
+      "configoption3": "7750",
+      "configoption4": "1",
+      "configoption5": "982",
+      "_moduleSettings": "CSV (bulk) delivery fixture for the bulk-guard test: configoption4 = 1 routes provisioning through createAccessTokenList, which stores no accessTokenId — the stock shape the lifecycle guards refuse to act on."
     }
   ],
 
