@@ -155,8 +155,13 @@ function vpnhoodstore_CreateAccount(array $params): string {
             'shopId'               => 'WHMCS'
         ];
 
-        if (Helper::isCsvTokenDelivery((int)$params['configoption4'], $count, (int)$params['model']->product->allowqty))
+        if (Helper::isCsvTokenDelivery((int)$params['configoption4'], $count, (int)$params['model']->product->allowqty)) {
             Helper::createAccessTokenList($createParams);
+            // bulk = stock: no single token exists behind this service, and every
+            // lifecycle action must learn that from an explicit mark rather than
+            // from a missing id (a half-failed single sale also has no id).
+            $params['model']->serviceProperties->save(['bulkDelivery' => 'yes']);
+        }
         else
             Helper::createAccessToken($params, $createParams);
 
