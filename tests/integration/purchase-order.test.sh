@@ -33,6 +33,9 @@ VH_ROOT="$(cd "$REPO_ROOT/.." && pwd)"
 SSH_KEY="${WHMCS_DEV_SSH_KEY:-$VH_ROOT/.user/account-dev.vpnhood.com/ssh.openssh}"
 SSH_HOST="${WHMCS_DEV_SSH_HOST:-whmcsdev@webhost-ftps.vpnhood.com}"
 SITE_URL="${WHMCS_DEV_URL:-https://whmcs-dev.vpnhood.com}"
+# tests and dev deploys run ONLY against the dev box — never production (account.vpnhood.com)
+case "${SSH_HOST:-}${SITE_URL:-}${WHMCS_DEV_URL:-}" in *account.vpnhood.com*) echo "!! REFUSED: production host detected" >&2; exit 1;; esac
+case "${SSH_HOST:-}" in *whmcsdev@*) ;; "") ;; *) echo "!! REFUSED: only whmcsdev@… (the dev box) is allowed, got: $SSH_HOST" >&2; exit 1;; esac
 SECRETS="$VH_ROOT/.user/account-dev.vpnhood.com/secrets.json"
 
 [ -f "$SSH_KEY" ] || { echo "SSH key not found: $SSH_KEY" >&2; exit 1; }
