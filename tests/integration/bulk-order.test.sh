@@ -1,18 +1,17 @@
 #!/usr/bin/env bash
 #
-# unsuspend.test.sh — unsuspend the buyer's suspended partner service.
+# Runner for its namesake .test.php — see that file for the contract.
 #
-# Requires a Suspended partner-type service for the buyer (either payment
-# type — run suspend.test.sh first). Uploads and runs unsuspend.test.php on
-# the dev box: calls localAPI('ModuleUnsuspend') on the buyer's service,
-# which relays through the real vpnhoodpartner_UnsuspendAccount hook to the
-# Hub's unsuspend action, and asserts both the buyer's and the reseller's
-# service end up Active.
+# The merchant bulk purchase end to end, no partner in the chain: a real qty>1
+# order on the hub CSV product, the batch provisioned at the access manager,
+# the stock marks, and the CSV export the client area's Download button uses.
 #
-# This script does NOT clean up anything before or after running — cleanup
-# only ever happens in purchase-order.test.sh.
+# Standalone: creates and cleans up its own order; safe to run in any sequence.
 #
-# Env overrides: WHMCS_DEV_SSH_KEY, WHMCS_DEV_SSH_HOST
+# ⚠ Creates BULK_QTY (default 2) real tokens at the access manager; cleanup
+#   expires + disables them when the CSV exposes their ids.
+#
+# Env overrides: WHMCS_DEV_SSH_KEY, WHMCS_DEV_SSH_HOST, BULK_QTY
 
 set -euo pipefail
 
@@ -29,8 +28,8 @@ case "${SSH_HOST:-}" in *whmcsdev@*) ;; "") ;; *) echo "!! REFUSED: only whmcsde
 [ -f "$SSH_KEY" ] || { echo "SSH key not found: $SSH_KEY" >&2; exit 1; }
 SSH=(ssh -i "$SSH_KEY" -o BatchMode=yes -o ConnectTimeout=15 "$SSH_HOST")
 
-echo "== Running unsuspend test on the dev box"
+echo "== Running bulk-order test on the dev box"
 "${SSH[@]}" 'mkdir -p ~/tmp/lib'
 scp -i "$SSH_KEY" -q "$SCRIPT_DIR/lib/common.php" "$SSH_HOST":tmp/lib/
-scp -i "$SSH_KEY" -q "$SCRIPT_DIR/unsuspend.test.php" "$SSH_HOST":tmp/
-"${SSH[@]}" "php ~/tmp/unsuspend.test.php; rc=\$?; rm -rf ~/tmp/unsuspend.test.php ~/tmp/lib; exit \$rc"
+scp -i "$SSH_KEY" -q "$SCRIPT_DIR/bulk-order.test.php" "$SSH_HOST":tmp/
+"${SSH[@]}" "BULK_QTY=${BULK_QTY:-2} php ~/tmp/bulk-order.test.php; rc=\$?; rm -rf ~/tmp/bulk-order.test.php ~/tmp/lib; exit \$rc"

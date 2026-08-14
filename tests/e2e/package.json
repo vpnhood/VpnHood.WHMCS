@@ -1,12 +1,12 @@
 {
   "name": "vpnhood-whmcs-e2e",
   "private": true,
+  "description": "Browser tests for the hub WHMCS store flows (cart warning, reseller CSV) against the dev install only.",
   "type": "module",
-  "description": "Browser-driven admin/client-area checks for the VpnHood WHMCS modules (dev server).",
   "scripts": {
-    "hub:configure": "node hub-admin-configure.mjs"
+    "test": "playwright test"
   },
-  "dependencies": {
-    "playwright": "1.61.1"
+  "devDependencies": {
+    "@playwright/test": "^1.49.0"
   }
 }
