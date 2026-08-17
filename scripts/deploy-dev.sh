@@ -182,11 +182,13 @@ deploy_iap() {
   lint_dir includes/hooks
   lint_dir modules/gateways
 
-  # IAP API smoke check: an active addon answers GET /system/status; an inactive one
+  # IAP API smoke check: an active addon answers GET /v1/system/status; an inactive one
   # answers its fail-closed 404 problem+json. Anything else (HTML error page, 5xx)
   # is a failure. The path also proves PATH_INFO routing survives the web server.
+  # Versioned on purpose — the unversioned path is a real 404 now, which would let a
+  # dead addon and a live one look identical here.
   local resp code body
-  resp="$("${SSH[@]}" "curl -sk -m 30 -w '\n%{http_code}' '$SITE_URL/modules/addons/vpnhoodiap/api.php/system/status'")"
+  resp="$("${SSH[@]}" "curl -sk -m 30 -w '\n%{http_code}' '$SITE_URL/modules/addons/vpnhoodiap/api.php/v1/system/status'")"
   code="$(printf '%s' "$resp" | tail -n1)"
   body="$(printf '%s' "$resp" | sed '$d')"
   if { [ "$code" = "200" ] && printf '%s' "$body" | grep -q '"status":"ok"'; } ||
