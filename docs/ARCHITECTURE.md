@@ -10,7 +10,7 @@ There are two repos in this product:
 
 | Repo | Runs on | Contains | Audience |
 |------|---------|----------|----------|
-| **VpnHood.WHMCS** (this repo) | **our** WHMCS | `vpnhoodstore`, `vpnhoodconfig`, `vpnhoodpartnerhub` | internal |
+| **VpnHood.WHMCS** (this repo) | **our** WHMCS | `vpnhoodstore`, `vpnhoodconfig`, `vpnhoodpartnerhub`, `vpnhoodverify` | internal |
 | **VpnHood.WHMCS.Partner** | a **partner's** WHMCS | `vpnhoodpartner` (connector) | external partners |
 
 The connector is a **separate repo** on purpose: it ships to outside parties, must not
@@ -69,6 +69,36 @@ CSV delivery does **not** — bulk keys are read back by `customerId` + `orderId
 Global settings store (API Key, Project ID, reseller restriction settings) in
 `tbladdonmodules`. Also drives the product-visibility hook
 `includes/hooks/vpnhoodstore-restrict-user-group-products.php`.
+
+### `modules/addons/vpnhoodverify/` (addon) — forced email verification
+Makes email verification mandatory for the client area. WHMCS's own
+`EnableEmailVerification` (General Settings → Security) mails the link and records the
+result in `tblusers.email_verified_at`, but is **deliberately non-blocking** — an
+unverified client browses the portal normally. This addon supplies only the missing
+enforcement: it owns no tables, keeps no verified-flag of its own, and treats
+`tblusers.email_verified_at` as the sole authority.
+
+- `vpnhoodverify.php` — settings, `_activate` (stamps the new-client cutoff), `_output`
+  (admin status + "clients currently gated" count), `_clientarea` (the gate page).
+- `hooks.php` — the `ClientAreaPage` gate. **Lives inside the addon, not `includes/hooks/`,
+  on purpose:** WHMCS loads an addon's `hooks.php` only while that addon is active, which
+  makes deactivation a real kill switch for a module whose failure mode is locking every
+  client out of the portal.
+- `lib/VerifyGate.php` — settings reader, scope check, verified check, resend.
+- `templates/verify-email.tpl` — the gate page.
+
+Scope is either `Every client` or `New clients only`, the latter keyed on
+`tblclients.datecreated >= CutoffDate` (stamped at activation). The cutoff exists because
+switching `EnableEmailVerification` on does **not** mail existing clients — gating them
+would bar people who were never sent a link.
+
+**Gates client-area pages only.** Not registration (WHMCS creates the client *then* mails
+the link — there is nothing to hook), not checkout (it would break
+register-and-order-in-one-step), not the admin area, and not `vpnhoodiap`'s `api.php`, so
+app-store purchases keep working throughout. The whitelist (`logout`, `verifyemail`,
+`password-reset`, WHMCS's `/user/verify`, this addon's page, `vpnhoodiap`'s pages) is
+load-bearing: WHMCS's link expires after 60 minutes and its own recovery advice is to log
+in and request a new one. Any exception fails open.
 
 ### `modules/addons/vpnhoodpartnerhub/` (addon) — wholesale gateway
 Turns our WHMCS into a partner-scoped wholesale API. **It adds only partner management +

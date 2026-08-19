@@ -11,6 +11,8 @@ WHMCS integration for **VpnHood** VPN. Two integration models live across two re
   - `vpnhoodconfig` — global API settings + product-visibility hook.
   - `vpnhoodpartnerhub` — wholesale gateway: a partner-scoped API that lets external partner
     WHMCS installs order/provision against this WHMCS using their **native WHMCS credit**.
+  - `vpnhoodverify` — forces client-area email verification (WHMCS's own setting only
+    mails the link; it blocks nothing).
 - **VpnHood.WHMCS.Partner** (separate repo) — the connector partners install on their own WHMCS.
 
 ## Read this first
@@ -72,4 +74,5 @@ mix test/dev files into the production tree:
 - Retail provisioning: `modules/servers/vpnhoodstore/`
 - Global settings + hooks: `modules/addons/vpnhoodconfig/`, `includes/hooks/`
 - Wholesale gateway: `modules/addons/vpnhoodpartnerhub/` (+ its `README.md` for the API)
+- Forced email verification: `modules/addons/vpnhoodverify/` (+ its `README.md`)
 - Developer guide: `docs/ARCHITECTURE.md`
