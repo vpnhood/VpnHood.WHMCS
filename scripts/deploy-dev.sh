@@ -121,7 +121,7 @@ lint_dir() {
 }
 
 deploy_hub() {
-  local dirs=(modules/servers/vpnhoodstore modules/addons/vpnhoodconfig modules/addons/vpnhoodpartnerhub)
+  local dirs=(modules/servers/vpnhoodstore modules/addons/vpnhoodconfig modules/addons/vpnhoodpartnerhub modules/addons/vpnhoodverify)
   local d
   for d in "${dirs[@]}"; do deploy_dir "$REPO_ROOT" "$d"; done
   overlay_dir "$REPO_ROOT" includes/hooks
