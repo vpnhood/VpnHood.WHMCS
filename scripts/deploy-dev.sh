@@ -30,6 +30,12 @@
 
 set -euo pipefail
 
+# macOS bsdtar writes AppleDouble ._* metadata entries into the stream; the
+# server's GNU tar extracts them as real files, polluting the webroot and
+# failing the md5 manifest. This env var tells bsdtar to omit them (no-op on
+# Linux/Git Bash).
+export COPYFILE_DISABLE=1
+
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 VH_ROOT="$(cd "$REPO_ROOT/.." && pwd)"
@@ -44,6 +50,9 @@ SSH_KEY="${WHMCS_DEV_SSH_KEY:-$VH_ROOT/.user/account-dev.vpnhood.com/ssh.openssh
 SSH_HOST="${WHMCS_DEV_SSH_HOST:-whmcsdev@webhost-ftps.vpnhood.com}"
 WEBROOT="${WHMCS_DEV_WEBROOT:-/home/whmcsdev/web/whmcs-dev.vpnhood.com/public_html}"
 SITE_URL="${WHMCS_DEV_URL:-https://whmcs-dev.vpnhood.com}"
+# tests and dev deploys run ONLY against the dev box — never production (account.vpnhood.com)
+case "${SSH_HOST:-}${SITE_URL:-}${WHMCS_DEV_URL:-}" in *account.vpnhood.com*) echo "!! REFUSED: production host detected" >&2; exit 1;; esac
+case "${SSH_HOST:-}" in *whmcsdev@*) ;; "") ;; *) echo "!! REFUSED: only whmcsdev@… (the dev box) is allowed, got: $SSH_HOST" >&2; exit 1;; esac
 PARTNER_REPO="${PARTNER_REPO:-$VH_ROOT/VpnHood.WHMCS.Partner}"
 IAP_REPO="${IAP_REPO:-$VH_ROOT/VpnHood.WHMCS.Iap}"
 
@@ -173,11 +182,13 @@ deploy_iap() {
   lint_dir includes/hooks
   lint_dir modules/gateways
 
-  # IAP API smoke check: an active addon answers GET /system/status; an inactive one
+  # IAP API smoke check: an active addon answers GET /v1/system/status; an inactive one
   # answers its fail-closed 404 problem+json. Anything else (HTML error page, 5xx)
   # is a failure. The path also proves PATH_INFO routing survives the web server.
+  # Versioned on purpose — the unversioned path is a real 404 now, which would let a
+  # dead addon and a live one look identical here.
   local resp code body
-  resp="$("${SSH[@]}" "curl -sk -m 30 -w '\n%{http_code}' '$SITE_URL/modules/addons/vpnhoodiap/api.php/system/status'")"
+  resp="$("${SSH[@]}" "curl -sk -m 30 -w '\n%{http_code}' '$SITE_URL/modules/addons/vpnhoodiap/api.php/v1/system/status'")"
   code="$(printf '%s' "$resp" | tail -n1)"
   body="$(printf '%s' "$resp" | sed '$d')"
   if { [ "$code" = "200" ] && printf '%s' "$body" | grep -q '"status":"ok"'; } ||

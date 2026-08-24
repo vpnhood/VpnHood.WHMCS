@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
 #
-# unsuspend.test.sh — unsuspend the buyer's suspended partner service.
+# Runner for its namesake .test.php — see that file for the contract.
 #
-# Requires a Suspended partner-type service for the buyer (either payment
-# type — run suspend.test.sh first). Uploads and runs unsuspend.test.php on
-# the dev box: calls localAPI('ModuleUnsuspend') on the buyer's service,
-# which relays through the real vpnhoodpartner_UnsuspendAccount hook to the
-# Hub's unsuspend action, and asserts both the buyer's and the reseller's
-# service end up Active.
+# Requires an Active partner-type service for the buyer (either payment type —
+# run purchase-order.test.sh first). Uploads and runs default-key.test.php on the
+# dev box: calls localAPI('ModuleSuspend') on the buyer's service, which
+# relays through the real vpnhoodpartner_SuspendAccount hook to the Hub's
+# suspend action, and asserts both the buyer's and the reseller's service end
+# up Suspended.
 #
 # This script does NOT clean up anything before or after running — cleanup
 # only ever happens in purchase-order.test.sh.
@@ -29,8 +29,8 @@ case "${SSH_HOST:-}" in *whmcsdev@*) ;; "") ;; *) echo "!! REFUSED: only whmcsde
 [ -f "$SSH_KEY" ] || { echo "SSH key not found: $SSH_KEY" >&2; exit 1; }
 SSH=(ssh -i "$SSH_KEY" -o BatchMode=yes -o ConnectTimeout=15 "$SSH_HOST")
 
-echo "== Running unsuspend test on the dev box"
+echo "== Running default-key test on the dev box"
 "${SSH[@]}" 'mkdir -p ~/tmp/lib'
 scp -i "$SSH_KEY" -q "$SCRIPT_DIR/lib/common.php" "$SSH_HOST":tmp/lib/
-scp -i "$SSH_KEY" -q "$SCRIPT_DIR/unsuspend.test.php" "$SSH_HOST":tmp/
-"${SSH[@]}" "php ~/tmp/unsuspend.test.php; rc=\$?; rm -rf ~/tmp/unsuspend.test.php ~/tmp/lib; exit \$rc"
+scp -i "$SSH_KEY" -q "$SCRIPT_DIR/default-key.test.php" "$SSH_HOST":tmp/
+"${SSH[@]}" "php ~/tmp/default-key.test.php; rc=\$?; rm -rf ~/tmp/default-key.test.php ~/tmp/lib; exit \$rc"
