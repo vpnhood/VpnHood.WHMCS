@@ -32,10 +32,22 @@ add_hook('ClientAreaPrimaryNavbar', 200, function($primaryNavbar) {
 
 /**
  * Silent Cart Guard
+ *
+ * Guards a BROWSING CUSTOMER's cart only. isResellerUser() asks who is logged in, which is
+ * meaningless for an order placed server-side: the Partner Hub calls localAPI('AddOrder')
+ * from its api.php, where no client is authenticated, so the check returned false, every
+ * restricted product was stripped, and WHMCS failed the order with "No items remain in the
+ * cart. Order cannot proceed." — silently, for months. Skip the sources that have no
+ * browsing user; keep guarding everything else (including an admin masquerading as a
+ * client, where isResellerUser() correctly resolves the masqueraded client).
  */
 add_hook('PreCalculateCartTotals', 200, function($vars) {
     $settings = get_vpnhoodstore_addon_params();
     if (!$settings) return;
+
+    if (isServerSidePurchase()) {
+        return;
+    }
 
     if (isResellerUser($settings->allowedClientGroups)) {
         return;
@@ -132,4 +144,24 @@ function isResellerUser(array $resellerUserGroups): bool {
     $client = $currentUser->client();
 
     return $cached = ($client && in_array((int)$client->groupid, $resellerUserGroups, true));
+}
+
+/**
+ * Is this order being placed server-side, with no browsing customer behind it?
+ *
+ * WHMCS stamps the cart with a `WHMCS\Order\OrderPurchaseSource` value. Only ADMIN (an
+ * admin ordering in the admin area) and LOCAL_API (localAPI, which is how the Partner Hub
+ * places every partner order) have no browsing user; CLIENT, CLIENT_API and an admin
+ * masquerading as a client all do, and stay guarded. An unrecognised or missing value is
+ * treated as a browsing customer, so the guard fails closed.
+ */
+function isServerSidePurchase(): bool {
+    if (!isset($_SESSION['cart']['orderPurchaseSource'])) {
+        return false;
+    }
+
+    return in_array((int)$_SESSION['cart']['orderPurchaseSource'], [
+        \WHMCS\Order\OrderPurchaseSource::ADMIN,
+        \WHMCS\Order\OrderPurchaseSource::LOCAL_API,
+    ], true);
 }

@@ -11,6 +11,8 @@ WHMCS integration for **VpnHood** VPN. Two integration models live across two re
   - `vpnhoodconfig` — global API settings + product-visibility hook.
   - `vpnhoodpartnerhub` — wholesale gateway: a partner-scoped API that lets external partner
     WHMCS installs order/provision against this WHMCS using their **native WHMCS credit**.
+  - `vpnhoodverify` — forces client-area email verification (WHMCS's own setting only
+    mails the link; it blocks nothing).
 - **VpnHood.WHMCS.Partner** (separate repo) — the connector partners install on their own WHMCS.
 
 ## Read this first
@@ -34,6 +36,10 @@ when you change architecture, the DB schema, or the API.
 - **Never hand-edit a module's version.** The root `VERSION` file is the single source of
   truth; `scripts/set-version.sh` stamps it into every module. CI bumps it on every push to
   main — see "Versioning & releases" in `docs/ARCHITECTURE.md`.
+- **Bump the version for ANY change to a module's files** — templates, hooks, a comment —
+  not only schema or DB changes. WHMCS decides what to reinstall by comparing the stamped
+  version, so an edit that ships under an unchanged number is an edit that silently does
+  not reach the install.
 - **No build/lint/test tooling** is configured here (no PHP CLI in this environment). The only
   CI is `.github/workflows/release.yml`, which versions and tags — it does not build or test.
   Verify on a live WHMCS — see the verification notes in `docs/ARCHITECTURE.md` and each README.
@@ -68,4 +74,5 @@ mix test/dev files into the production tree:
 - Retail provisioning: `modules/servers/vpnhoodstore/`
 - Global settings + hooks: `modules/addons/vpnhoodconfig/`, `includes/hooks/`
 - Wholesale gateway: `modules/addons/vpnhoodpartnerhub/` (+ its `README.md` for the API)
+- Forced email verification: `modules/addons/vpnhoodverify/` (+ its `README.md`)
 - Developer guide: `docs/ARCHITECTURE.md`
