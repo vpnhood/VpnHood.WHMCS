@@ -22,13 +22,29 @@ provisioning (the existing `vpnhoodstore` / `Helper` / `ApiService` do that).
 1. Copy `modules/addons/vpnhoodpartnerhub/` into your WHMCS `/modules/addons/`.
 2. **System Settings → Addon Modules → VpnHood! Partner Hub → Activate**. Activation
    creates the tables `mod_vpnhood_partners`, `mod_vpnhood_partner_products`,
-   `mod_vpnhood_partner_log`. **Deactivating preserves all data** (partners keep their API
-   credentials across a deactivate/reactivate); to remove the module's data permanently,
-   drop those tables manually.
+   `mod_vpnhood_partner_log`. **Deactivating preserves partner data** (partners keep their
+   API credentials across a deactivate/reactivate); to remove the module's data
+   permanently, drop those tables manually.
+
+   > ⚠ **Deactivating does NOT preserve the addon's own settings.** WHMCS deletes every
+   > `tbladdonmodules` row for a module the moment you deactivate it, so Require IP
+   > Allowlist, Reference Currency and Order Payment Gateway all come back blank on
+   > reactivation. The tables survive; the configuration does not. Write the settings down
+   > before deactivating anything. (Verified on WHMCS 9.0.3 — this bites every addon,
+   > including the partner-side connector, whose Hub URL / API key / API secret are wiped
+   > the same way.)
 3. Configure the addon: toggle **Require IP Allowlist**, set a reference currency for the
-   admin balance display, and set **Order Payment Gateway** to the system name of an active
-   gateway (e.g. `banktransfer`). The gateway only labels the partner order invoices — they
-   are still settled from the partner's credit balance — but WHMCS needs a valid one.
+   admin balance display, and pick an **Order Payment Gateway**. That field is a dropdown
+   of the gateways this install actually has, listed as *Display Name (system name)*; the
+   stored value is always the system name (e.g. `banktransfer`), which is what WHMCS's
+   `AddOrder` requires. The gateway only labels the partner order invoices — they are still
+   settled from the partner's credit balance — but WHMCS needs a valid one.
+
+   The field reports the state of the current value in its own description on the
+   configuration screen, including immediately after **Save Changes**: green when the value
+   is an active gateway, red when it is not. A value inherited from an older version that
+   is not a real gateway stays selected and is labelled `⚠ … — NOT a payment gateway`
+   rather than being silently replaced, so nothing changes behind your back.
 
 > Requires the existing `vpnhoodstore` server module and `vpnhoodconfig` addon to be
 > installed and configured (the Hub provisions through them).
