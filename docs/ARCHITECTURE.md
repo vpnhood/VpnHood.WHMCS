@@ -169,6 +169,57 @@ same query, so another partner's order simply returns `404`. `getAccessCode` re-
 live from the access server, resolving `accessTokenId` from the partner's own service rather
 than accepting it from the request.
 
+### Error statuses: never 5xx for a rejection the partner can act on
+
+`PartnerApiController::localApi()` wraps every `localAPI` call and turns a non-`success`
+result into an `ApiException` with **422**, message `Upstream WHMCS rejected <Action>: <its
+message>`. It must not be a 5xx, and that is not a style preference:
+
+> **Cloudflare replaces the body of a 5xx origin response with its own error page.** The
+> connector therefore receives `Invalid response from Hub (HTTP 502): error code: 502` and
+> the real reason never crosses the wire. A 4xx body passes through untouched.
+
+This cost a live debugging session: every partner order was being rejected with *"Invalid
+Payment Method. Valid options include banktransfer,…"* because the addon's **Order Payment
+Gateway** was set to a gateway's display name (`Offline Crypto Transfer`) instead of its
+system name (`banktransfer`) — `AddOrder` only accepts the system name. The Hub reported it
+correctly; Cloudflare ate the sentence. Keep new failure paths in the 4xx range whenever the
+caller could do something about them.
+
+The misconfiguration itself is now unreachable: the setting is a dropdown built from
+`tblpaymentgateways` (`vpnhoodpartnerhub_gatewayField()`), so only real system names can be
+stored, and `vpnhoodpartnerhub_gatewayVerdict()` states the verdict on the current value in
+the field's own description — the addon page's `vpnhoodpartnerhub_gatewayWarning()` banner
+is not where an admin lands after **Save Changes**.
+
+### The cart guard must not fire on a Hub order
+
+`includes/hooks/vpnhoodstore-restrict-user-group-products.php` hooks `PreCalculateCartTotals`
+and silently removes any cart item whose **product group name** appears in `vpnhoodconfig`'s
+`RestrictedProductGroupNames`, unless the logged-in client is in `AllowedClientGroups`.
+
+That check asks *who is browsing*. A Hub order has nobody browsing: `api.php` calls
+`localAPI('AddOrder')` with no authenticated client, so `isResellerUser()` returned false,
+every partner product was stripped, and WHMCS failed the order with **"No items remain in
+the cart. Order cannot proceed."** On our production install both partner groups are listed
+in that setting, so **no Hub order had ever succeeded** — the partner products had zero
+services to their name.
+
+`isServerSidePurchase()` now exempts `OrderPurchaseSource::ADMIN` and `::LOCAL_API`. Every
+other source — `CLIENT`, `CLIENT_API`, an admin masquerading as a client, and a missing or
+unrecognised value — stays guarded, so the customer-facing restriction is unchanged.
+
+> Reproducing this needs an **HTTP** request, not `php script.php`. The guard returns early
+> when `$_SESSION['cart']['products']` is empty, and there is no session under the CLI, so a
+> CLI test passes no matter how badly the hook is broken. Two rounds of CLI testing here
+> "cleared" the hook before an HTTP test reproduced the failure on the first attempt.
+
+> **WHMCS deletes an addon's `tbladdonmodules` rows on deactivate.** Every setting comes
+> back blank on reactivation (the module's own tables survive). Verified on 9.0.3. This
+> applies to the partner-side `vpnhoodpartnerconfig` too, where it wipes the Hub URL, API
+> key and API secret — and the secret is stored only as a hash upstream, so it cannot be
+> read back and must be regenerated. Record settings before deactivating anything.
+
 ## Renewals — recurring Hub products are MANUAL
 
 Recurring products sold through the Hub do **not** auto-renew. WHMCS generates the renewal

@@ -34,7 +34,7 @@ function vpnhoodpartnerhub_config(): array
     return [
         'name'        => 'VpnHood! Partner Hub',
         'description' => 'Wholesale partner gateway: lets external partner WHMCS installs order and provision VpnHood keys against this WHMCS using the partner\'s native credit balance.',
-        'version'     => '1.0.3',
+        'version'     => '1.0.7',
         'author'      => 'VpnHood',
         'fields'      => [
             'RequireIpAllowlist' => [
@@ -50,15 +50,146 @@ function vpnhoodpartnerhub_config(): array
                 'Description'  => 'ISO currency code shown in the admin balance view (informational only). Example: USD',
                 'Default'      => 'USD',
             ],
-            'OrderGateway' => [
-                'FriendlyName' => 'Order Payment Gateway',
-                'Type'         => 'text',
-                'Size'         => '25',
-                'Description'  => 'System name of an active payment gateway to tag partner order invoices with (e.g. banktransfer). Invoices are still settled from the partner\'s credit balance; this only labels them. Leave blank to use the WHMCS default.',
-                'Default'      => '',
-            ],
+            'OrderGateway' => vpnhoodpartnerhub_gatewayField(),
         ],
     ];
+}
+
+/**
+ * Build the Order Payment Gateway field.
+ *
+ * WHMCS's AddOrder takes a gateway's SYSTEM name (banktransfer) while the admin area
+ * everywhere else shows its DISPLAY name ("Offline Crypto Transfer"), so typing what you
+ * can see is the natural mistake — and it breaks every partner order with "Invalid Payment
+ * Method" while leaving this page looking perfectly configured.
+ *
+ * A free-text box cannot be got right by inspection, so the field is a dropdown of the
+ * gateways this install actually has: the wrong value can no longer be entered. The
+ * verdict on the CURRENT value is folded into this field's own Description, because that
+ * is the only thing rendered on the configuration screen — the addon's own page (where
+ * vpnhoodpartnerhub_gatewayWarning() prints) is not where an admin lands after Save.
+ *
+ * Falls back to the original text box if the gateway list cannot be read, so a
+ * configuration screen is never lost to a failed query.
+ */
+function vpnhoodpartnerhub_gatewayField(): array
+{
+    $field = [
+        'FriendlyName' => 'Order Payment Gateway',
+        'Type'         => 'text',
+        'Size'         => '25',
+        'Description'  => 'System name of an active payment gateway to tag partner order invoices with (e.g. banktransfer). Invoices are still settled from the partner\'s credit balance; this only labels them. Leave blank to use the WHMCS default.',
+        'Default'      => '',
+    ];
+
+    try {
+        $gateways = vpnhoodpartnerhub_activeGateways();
+        if (!$gateways) {
+            return $field;
+        }
+
+        $configured = vpnhoodpartnerhub_configuredGateway();
+
+        $options = ['' => 'Use the WHMCS default'];
+        foreach ($gateways as $system => $display) {
+            $options[$system] = $display === $system ? $system : $display . ' (' . $system . ')';
+        }
+
+        // An unrecognised stored value stays selectable, and named as the fault it is:
+        // dropping it from the list would make merely opening this page silently rewrite
+        // the setting to something the admin never chose.
+        if ($configured !== '' && !isset($gateways[$configured])) {
+            $options[$configured] = '⚠ ' . $configured . ' — NOT a payment gateway';
+        }
+
+        unset($field['Size']);
+        $field['Type'] = 'dropdown';
+        $field['Options'] = $options;
+        $field['Description'] = 'Tags partner order invoices with this gateway. They are still settled from '
+            . 'the partner\'s credit balance; this only labels them.'
+            . vpnhoodpartnerhub_gatewayVerdict($configured, $gateways);
+
+        return $field;
+    } catch (\Throwable $e) {
+        // Never let a decorative query cost the admin their configuration screen.
+        return $field;
+    }
+}
+
+/**
+ * Active payment gateways on this install, as system name => display name.
+ */
+function vpnhoodpartnerhub_activeGateways(): array
+{
+    $gateways = [];
+    foreach (Capsule::table('tblpaymentgateways')->where('setting', 'name')->get() as $row) {
+        $system = trim((string) $row->gateway);
+        if ($system !== '') {
+            $gateways[$system] = trim((string) $row->value) ?: $system;
+        }
+    }
+
+    return $gateways;
+}
+
+/**
+ * The currently stored OrderGateway value, read straight from the DB.
+ *
+ * Read here rather than taken from $vars because _config() is also called before the
+ * settings are handed to it, and because after a Save this is the freshly written value.
+ */
+function vpnhoodpartnerhub_configuredGateway(): string
+{
+    return trim((string) Capsule::table('tbladdonmodules')
+        ->where('module', 'vpnhoodpartnerhub')
+        ->where('setting', 'OrderGateway')
+        ->value('value'));
+}
+
+/**
+ * State-of-the-setting line appended to the field description on the config screen.
+ *
+ * Reports in every case — a missing banner would be ambiguous between "fine" and
+ * "the check did not run".
+ */
+function vpnhoodpartnerhub_gatewayVerdict(string $configured, array $gateways): string
+{
+    if ($configured === '') {
+        return '<br><span style="color:#3c8dbc;">Currently blank &mdash; partner order invoices use the WHMCS '
+            . 'default gateway. That is a valid setting.</span>';
+    }
+
+    if (isset($gateways[$configured])) {
+        return '<br><span style="color:#3c763d;">&#10003; Currently <strong>'
+            . htmlspecialchars($configured, ENT_QUOTES) . '</strong> ('
+            . htmlspecialchars($gateways[$configured], ENT_QUOTES) . '), an active gateway on this install.</span>';
+    }
+
+    return '<br><span style="color:#a94442;"><strong>&#9888; '
+        . htmlspecialchars($configured, ENT_QUOTES) . ' is not a payment gateway on this install, so every '
+        . 'partner order will fail</strong> with &ldquo;Invalid Payment Method&rdquo;. '
+        . vpnhoodpartnerhub_gatewayHint($configured, $gateways) . '</span>';
+}
+
+/**
+ * Point at the right value: name the system name outright when the configured string is
+ * recognisably a display name, otherwise list what this install actually has.
+ */
+function vpnhoodpartnerhub_gatewayHint(string $configured, array $gateways): string
+{
+    foreach ($gateways as $system => $display) {
+        if (strcasecmp($display, $configured) === 0) {
+            $safe = htmlspecialchars($system, ENT_QUOTES);
+
+            return 'That is the <em>display name</em> of the <code>' . $safe . '</code> gateway &mdash; select '
+                . '<code>' . $safe . '</code> instead.';
+        }
+    }
+
+    return 'Active gateway system names on this install: ' . implode(', ', array_map(
+        static fn ($n) => '<code>' . htmlspecialchars($n, ENT_QUOTES) . '</code>',
+        array_keys($gateways)
+    )) . '.';
 }
 
 /**
@@ -260,10 +391,52 @@ function vpnhoodpartnerhub_output(array $vars): void
         echo '<div class="alert alert-' . $noticeType . '">' . $notice . '</div>';
     }
 
+    echo vpnhoodpartnerhub_gatewayWarning();
+
     if ($action === 'edit' || $action === 'new') {
         vpnhoodpartnerhub_renderEditForm($repo, $modulelink, (int) ($_REQUEST['id'] ?? 0), $vars);
     } else {
         vpnhoodpartnerhub_renderList($repo, $modulelink);
+    }
+}
+
+/**
+ * Warn when the configured Order Payment Gateway is not a real gateway.
+ *
+ * WHMCS's AddOrder takes a gateway's SYSTEM name (banktransfer), while the admin
+ * area everywhere else shows its DISPLAY name ("Offline Crypto Transfer"), so
+ * typing what you can see is the natural mistake — and it breaks every partner
+ * order with "Invalid Payment Method" while leaving this page looking perfectly
+ * configured. Worse, the failure is invisible downstream: the partner just gets a
+ * rejected order.
+ *
+ * Blank is valid and means "use the WHMCS default", so only a non-empty value is
+ * checked.
+ */
+function vpnhoodpartnerhub_gatewayWarning(): string
+{
+    try {
+        $configured = vpnhoodpartnerhub_configuredGateway();
+        if ($configured === '') {
+            return '';
+        }
+
+        $gateways = vpnhoodpartnerhub_activeGateways();
+        if (!$gateways || isset($gateways[$configured])) {
+            return '';
+        }
+
+        return '<div class="alert alert-danger">'
+            . '<strong>Order Payment Gateway is not a valid gateway.</strong> '
+            . '<code>' . htmlspecialchars($configured, ENT_QUOTES) . '</code> is not the system name of an active '
+            . 'payment gateway, so <strong>every partner order will fail</strong> with '
+            . '&ldquo;Invalid Payment Method&rdquo;. '
+            . vpnhoodpartnerhub_gatewayHint($configured, $gateways)
+            . ' Fix it in <em>Addon Modules &rarr; VpnHood! Partner Hub &rarr; Configure</em>, or clear it to use the '
+            . 'WHMCS default.</div>';
+    } catch (\Throwable $e) {
+        // A warning that cannot be computed must never take the admin page down.
+        return '';
     }
 }
 
