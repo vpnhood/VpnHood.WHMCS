@@ -47,6 +47,7 @@ fi
 PHP_MODULES=(
   "modules/addons/vpnhoodconfig/vpnhoodconfig.php"
   "modules/addons/vpnhoodpartnerhub/vpnhoodpartnerhub.php"
+  "modules/addons/vpnhoodverify/vpnhoodverify.php"
 )
 
 # Server modules: the "version" key of the module's whmcs.json manifest.
