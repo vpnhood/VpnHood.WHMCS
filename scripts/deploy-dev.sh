@@ -21,7 +21,7 @@
 # deployed .php with the server's PHP, and smoke-checks the Hub endpoint.
 #
 # Config (env vars, all optional):
-#   WHMCS_DEV_SSH_KEY   default <Vh root>/.user/account-dev.vpnhood.com/ssh.openssh
+#   WHMCS_DEV_SSH_KEY   default <Vh root>/.user/ssh/ssh.openssh
 #   WHMCS_DEV_SSH_HOST  default whmcsdev@webhost-ftps.vpnhood.com
 #   WHMCS_DEV_WEBROOT   default /home/whmcsdev/web/whmcs-dev.vpnhood.com/public_html
 #   WHMCS_DEV_URL       default https://whmcs-dev.vpnhood.com
@@ -46,7 +46,7 @@ case "$TARGET" in
   *) echo "Usage: $0 [hub|partner|iap|all]" >&2; exit 2 ;;
 esac
 
-SSH_KEY="${WHMCS_DEV_SSH_KEY:-$VH_ROOT/.user/account-dev.vpnhood.com/ssh.openssh}"
+SSH_KEY="${WHMCS_DEV_SSH_KEY:-$VH_ROOT/.user/ssh/ssh.openssh}"
 SSH_HOST="${WHMCS_DEV_SSH_HOST:-whmcsdev@webhost-ftps.vpnhood.com}"
 WEBROOT="${WHMCS_DEV_WEBROOT:-/home/whmcsdev/web/whmcs-dev.vpnhood.com/public_html}"
 SITE_URL="${WHMCS_DEV_URL:-https://whmcs-dev.vpnhood.com}"
