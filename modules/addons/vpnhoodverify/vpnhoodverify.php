@@ -36,7 +36,7 @@ function vpnhoodverify_config(): array
     return [
         'name'        => 'VpnHood! Verify',
         'description' => 'Requires clients to confirm their email address before the client area opens. WHMCS mails the link; this addon is what makes it mandatory.',
-        'version'     => '1.0.7',
+        'version'     => '1.0.3',
         'author'      => 'VpnHood',
         'fields'      => [
             'GateEnabled' => [
