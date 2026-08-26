@@ -3,16 +3,24 @@
 This package includes:
 - `vpnhoodstore`: WHMCS provisioning module for VpnHood
 - `vpnhoodconfig`: Addon module for global API settings
+- `vpnhoodverify`: Addon that makes email verification mandatory for the client area
+  (see [modules/addons/vpnhoodverify/README.md](modules/addons/vpnhoodverify/README.md)).
 - `vpnhoodpartnerhub`: Wholesale addon — lets external partner WHMCS installs order and
   provision VpnHood keys against this WHMCS using their prepaid credit
   (see [modules/addons/vpnhoodpartnerhub/README.md](modules/addons/vpnhoodpartnerhub/README.md)).
   The partner-side connector module lives in the separate **VpnHood.WHMCS.Partner** repo.
 
+The release package also bundles the `vpnhoodiap` addon **verbatim** from the separate
+**VpnHood.WHMCS.Iap** repo (app-store purchases → WHMCS orders); see that repo's README
+for its own setup and requirements.
+
 ## Installation
 
 1. Extract the ZIP file.
 2. Copy the `modules/servers/vpnhoodstore/` folder to your WHMCS `/modules/servers/` directory.
-3. Copy the `modules/addons/vpnhoodconfig/` folder to your WHMCS `/modules/addons/` directory.
+3. Copy the `modules/addons/` folders (`vpnhoodconfig`, `vpnhoodverify`,
+   `vpnhoodpartnerhub`, `vpnhoodiap`) to your WHMCS `/modules/addons/` directory —
+   activate only the addons you actually use.
 
 ## Configuration
 

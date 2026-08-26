@@ -5,7 +5,7 @@
 > their AI assistants) picking up the work. The full design document (architecture,
 > flow charts, security model, phasing) lives in the owner's private ops repo — ask
 > for it if you need the deep rationale. Keep this file updated as phases complete.
-> Last updated: 2026-08-05.
+> Last updated: 2026-08-26.
 
 ## What this is
 
@@ -30,11 +30,12 @@ contract, test harness), this repo's [ARCHITECTURE.md](ARCHITECTURE.md),
 `VpnHood/src/AppLib/VpnHood.AppLib.Ios.AppStore/swift/README.md` (Swift facade
 contract).
 
-## Shipped state (2026-08-05)
+## Shipped state (2026-08-26)
 
-- **Releases live**: Iap **v1.0.0** (`vpnhoodiap.zip`), hub **v1.0.0** (`vpnhoodhub.zip`),
-  partner **v1.0.3** (`vpnhoodpartner.zip`). Both consumer zips verified to bundle
-  the identical vpnhoodiap 1.0.0.
+- **Releases live**: Iap **v1.2.1**, hub **v1.1.0** (bundling that Iap verbatim).
+  **Production (`account.vpnhood.com`) runs hub 1.1.0 + iap 1.2.1 since 2026-08-26**,
+  with `_upgrade()` verified against live data. The partner repo pins
+  `IAP_VERSION` 1.2.1; its release is dispatched separately ("ship iap").
 - **Google Play**: full pipeline implemented (verify, RTDN webhook with Pub/Sub OIDC
   auth, renewals, voided sweep, reconciliation cron). Proven end-to-end on dev WHMCS
   with a fake store adapter (real order, paid invoice, real access code from
@@ -107,7 +108,9 @@ contract).
 3. **Build `VpnHoodStoreKit.xcframework` on a Mac** (`swift/build-xcframework.sh`)
    and commit it (conditional NativeReference picks it up).
 4. **Android switchover**: set `AppConfigs.PortalBaseUri`, ship, monitor; Store.Server
-   then serves old app versions only.
+   then serves old app versions only. **Held by owner (2026-08-26): existing users are
+   not touched until the new app publishes** (this also holds the production
+   `backfill-account-keys.php` run).
 5. **Connect.Ios app** creation + wiring (AppleAuthenticationProvider →
    PortalAuthenticationProvider → AppStoreBillingProvider → PortalAccountProvider);
    StoreKit sandbox e2e incl. Restore Purchases.
