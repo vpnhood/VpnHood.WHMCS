@@ -63,9 +63,10 @@ mix test/dev files into the production tree:
 
 ## Dev server & credentials
 
-- Credentials live outside the repo in `..\.user\account-dev.vpnhood.com\` (i.e. `<Vh root>\.user\account-dev.vpnhood.com\`),
-  following the `.user/<host>/` convention: `ssh.openssh` (private key), `ssh.ppk`, `ssh.pub`.
-- Dev WHMCS for verification/testing: `ssh -i <Vh root>\.user\account-dev.vpnhood.com\ssh.openssh
+- Credentials live outside the repo: admin logins in `<Vh root>\.user\account-dev.vpnhood.com\secrets.json`
+  (the `.user/<host>/` convention), and the SSH key in `<Vh root>\.user\ssh\ssh.openssh` —
+  one key for both WHMCS accounts (`whmcsdev` and `accountvpnhood`), not per host.
+- Dev WHMCS for verification/testing: `ssh -i <Vh root>\.user\ssh\ssh.openssh
   whmcsdev@webhost-ftps.vpnhood.com`, web root
   `/home/whmcsdev/web/whmcs-dev.vpnhood.com/public_html`, site `https://whmcs-dev.vpnhood.com`.
 
