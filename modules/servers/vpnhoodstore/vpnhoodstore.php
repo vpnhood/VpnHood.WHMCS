@@ -234,7 +234,8 @@ function vpnhoodstore_ClientArea(array $params): array {
 
     return array(
         'templatefile' => $isCsvTokenDelivery ? 'clientarea-reseller.tpl' : 'clientarea.tpl',
-        'templateVariables' => vpnhoodstore_storeBadgeVars($params),
+        'templateVariables' => vpnhoodstore_storeBadgeVars($params)
+            + array('partnerOrderId' => vpnhoodstore_partnerOrderId($params)),
     );
 }
 
@@ -276,18 +277,55 @@ function vpnhoodstore_storeLabel(string $store): string {
 }
 
 /**
+ * The WHMCS ORDER id behind this service — but only for a partner-hub client.
+ *
+ * A partner drives these keys through the Hub API, where the handle is the order id,
+ * while every client-area link addresses the SERVICE id. Both are dense sequences over
+ * different tables, so the same number is live in both for different customers: a partner
+ * read `502` off this page, sent it as `upstreamOrderId`, and it was another customer's
+ * order (2026-09-01). Naming the order id next to the key is what stops that.
+ *
+ * Empty for everyone else — retail buyers never call the API — and empty on installs
+ * without the Hub addon, which is why the partner table is probed before it is read: this
+ * module ships standalone and must not assume the addon is present.
+ */
+function vpnhoodstore_partnerOrderId(array $params): string {
+    try {
+        if (!Capsule::schema()->hasTable('mod_vpnhood_partners'))
+            return '';
+
+        $isPartner = Capsule::table('mod_vpnhood_partners')
+            ->where('client_id', (int)$params['userid'])
+            ->exists();
+
+        return $isPartner ? (string)($params['model']['orderid'] ?? '') : '';
+    }
+    catch (Throwable $e) {
+        return '';
+    }
+}
+
+/**
  * Admin service page: show which store sold this service, so an admin reading the
- * order sees what the customer sees without opening the IAP addon. Read-only — the
- * purchase record owns this value, it is not editable here.
+ * order sees what the customer sees without opening the IAP addon, plus — for partner
+ * clients — the order id their API calls must carry, so support can answer "which id?"
+ * from the page it is being asked about. Read-only — the purchase and order records own
+ * these values, neither is editable here.
  */
 function vpnhoodstore_AdminServicesTabFields(array $params): array {
+    $fields = array();
+
     $label = vpnhoodstore_storeBadgeVars($params)['purchasedViaLabel'];
-    if ($label === '') {
-        return array();
+    if ($label !== '') {
+        $fields['Purchased via'] = htmlspecialchars($label, ENT_QUOTES, 'UTF-8')
+            . ' <em>(billed by the store — cancellations and refunds happen there)</em>';
     }
 
-    return array(
-        'Purchased via' => htmlspecialchars($label, ENT_QUOTES, 'UTF-8')
-            . ' <em>(billed by the store — cancellations and refunds happen there)</em>',
-    );
+    $partnerOrderId = vpnhoodstore_partnerOrderId($params);
+    if ($partnerOrderId !== '') {
+        $fields['Partner API order id'] = '#' . htmlspecialchars($partnerOrderId, ENT_QUOTES, 'UTF-8')
+            . ' <em>(the <code>upstreamOrderId</code> this partner must send — not the service id in the page address)</em>';
+    }
+
+    return $fields;
 }

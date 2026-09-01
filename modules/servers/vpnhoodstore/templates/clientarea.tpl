@@ -15,6 +15,17 @@
     </div>
 {/if}
 
+{* Partner clients drive these keys through the Hub API, whose handle is the ORDER id,
+   while this page's own address carries the SERVICE id. Both numbers exist for different
+   customers, so the one their API takes is named here. Empty for every other client. *}
+{if $partnerOrderId}
+    <p class="text-muted">
+        <strong>VpnHood order #{$partnerOrderId|escape}</strong> — quote this in support, and
+        send it as <code>upstreamOrderId</code> in the Partner API. The id in this page's
+        address is the service id and is not accepted there.
+    </p>
+{/if}
+
 <p>You can get your premium code using the button below.</p>
 
 <button id="getPremiumCode" class="btn btn-success">Get Premium Code</button>

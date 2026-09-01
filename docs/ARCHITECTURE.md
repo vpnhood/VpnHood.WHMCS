@@ -169,6 +169,13 @@ same query, so another partner's order simply returns `404`. `getAccessCode` re-
 live from the access server, resolving `accessTokenId` from the partner's own service rather
 than accepting it from the request.
 
+It is deliberately **not** the service id, even though one Hub order maps to exactly one
+service. Both ids are dense integer sequences over different tables, so the same number is
+live in both for different customers, and a lookup that accepted either would silently act on
+the wrong key. One handle, therefore: the order id — surfaced next to the key wherever a
+partner can read it (`vpnhoodstore` client area and admin tab here, `vpnhoodpartner`'s admin
+tab downstream), and named in the `404` when the other id arrives.
+
 ### Error statuses: never 5xx for a rejection the partner can act on
 
 `PartnerApiController::localApi()` wraps every `localAPI` call and turns a non-`success`

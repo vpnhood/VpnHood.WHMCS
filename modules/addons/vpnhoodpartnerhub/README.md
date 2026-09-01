@@ -121,6 +121,13 @@ Body: `{ "action": "<action>", ...params }`. Response:
 > calling partner's client. Ids from the request are never trusted — an order belonging to
 > another partner resolves to `404`.
 >
+> **It is not the service id.** The upstream client area addresses services by their own id
+> (`clientarea.php?action=productdetails&id=...`), and the two sequences hand the same number
+> to unrelated records — service `502` and order `502` belong to different customers. Only the
+> id `order` returned is accepted here; a service id resolves to `404`. When an id has to be
+> quoted in a support exchange, quote `accessTokenId` instead: it is a GUID, unambiguous across
+> both installs, and both `order` and `getAccessCode` return it.
+>
 > `getAccessCode` fetches the **current** code live from the access server. The connector
 > stores `accessTokenId` for reference but does not send it: the Hub resolves the token from
 > the partner's own order, so one partner can never read another's code. This is what backs the

@@ -510,7 +510,15 @@ class PartnerApiController
             ->first();
 
         if ($service === null) {
-            throw new ApiException('Order not found for this partner.', 404);
+            // Name the id we wanted. The client area addresses services by their OWN id
+            // (clientarea.php?action=productdetails&id=...), and the two sequences hand the
+            // same number to unrelated records — a partner who read the number off that page
+            // sends a service id and, without this sentence, gets a bare 404 (seen 2026-09-01).
+            throw new ApiException(
+                'Order not found for this partner. upstreamOrderId is our WHMCS ORDER id, the one '
+                . '"order" returned — not the service id shown on the client-area service page.',
+                404
+            );
         }
         return $service;
     }
