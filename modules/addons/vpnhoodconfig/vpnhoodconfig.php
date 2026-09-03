@@ -51,65 +51,26 @@ function vpnhoodconfig_deactivate() {}
 function vpnhoodconfig_output($vars)
 {
     echo '<p>Configure this addon from the <strong>System Settings → Addon Modules → VpnHood! MANAGER Configuration</strong></p>';
-    echo vpnhoodconfig_moduleVersions();
-}
 
-/**
- * Show the installed version of every VpnHood module.
- *
- * WHMCS displays a version for *addon* modules on its own (from _config), but has
- * no equivalent for provisioning modules — so vpnhoodstore would otherwise report
- * its version nowhere. Server-module versions are read from the module's
- * whmcs.json manifest, which scripts/set-version.sh keeps in step with the repo
- * tag on every release.
- */
-function vpnhoodconfig_moduleVersions(): string
-{
-    $modulesDir = dirname(__DIR__, 2); // .../modules
+    // The check ships with every VpnHood package, at the same path in each, so this
+    // page works whether or not any other package is installed alongside.
+    $check = ROOTDIR . '/modules/widgets/vpnhoodupdates.php';
+    if (!is_readable($check)) {
+        return;
+    }
+    require_once $check;
 
-    // Provisioning modules only — addons report their own version to WHMCS.
-    // vpnhoodpartner is the connector (from the VpnHood.WHMCS.Partner repo); it is
-    // normally absent here and simply gets skipped when it is.
-    $modules = [
-        'VpnHood Store (provisioning)'             => $modulesDir . '/servers/vpnhoodstore/whmcs.json',
-        'VpnHood Partner Connector (provisioning)' => $modulesDir . '/servers/vpnhoodpartner/whmcs.json',
-    ];
-
-    $rows = '';
-    foreach ($modules as $label => $manifest) {
-        $version = vpnhoodconfig_manifestVersion($manifest);
-        if ($version === null) {
-            continue; // module not installed on this WHMCS
-        }
-        $rows .= '<tr><td>' . htmlspecialchars($label, ENT_QUOTES) . '</td>'
-               . '<td><code>' . htmlspecialchars($version, ENT_QUOTES) . '</code></td></tr>';
+    // "Check now" is a plain link on purpose: it only refetches a public version
+    // number and rewrites a cache row, so the worst a forged click can achieve is
+    // an early refresh. Anything that WROTE to the install would need a token.
+    if (isset($_GET['vhcheck'])) {
+        VpnHoodUpdateCheck::refresh(true);
+        echo '<div class="infobox">Checked just now.</div>';
     }
 
-    $config = vpnhoodconfig_config();
-    $rows .= '<tr><td>VpnHood! MANAGER Configuration (addon)</td>'
-           . '<td><code>' . htmlspecialchars($config['version'], ENT_QUOTES) . '</code></td></tr>';
-
-    return '<h3>Installed module versions</h3>'
-         . '<table class="table table-condensed" style="width:auto;">'
-         . '<thead><tr><th>Module</th><th>Version</th></tr></thead>'
-         . '<tbody>' . $rows . '</tbody></table>';
-}
-
-/** Read the "version" key from a module's whmcs.json, or null if not installed. */
-function vpnhoodconfig_manifestVersion(string $manifest): ?string
-{
-    if (!is_readable($manifest)) {
-        return null;
-    }
-
-    // WHMCS' own tooling writes these manifests, sometimes with a UTF-8 BOM.
-    $raw = (string) file_get_contents($manifest);
-    $raw = preg_replace('/^\xEF\xBB\xBF/', '', $raw);
-
-    $json = json_decode($raw, true);
-    if (!is_array($json)) {
-        return null;
-    }
-
-    return isset($json['version']) ? (string) $json['version'] : 'unversioned';
+    $status = VpnHoodUpdateCheck::status();
+    echo '<h3>Installed VpnHood packages</h3>'
+       . VpnHoodUpdateCheck::renderTable($status)
+       . '<p class="text-muted">' . VpnHoodUpdateCheck::lastCheckedText($status)
+       . ' &nbsp; <a href="addonmodules.php?module=vpnhoodconfig&vhcheck=1" class="btn btn-default btn-xs">Check now</a></p>';
 }

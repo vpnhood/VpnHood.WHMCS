@@ -1,0 +1,11 @@
+{
+    "module": "vpnhoodstore",
+    "kind": "server",
+    "label": "VpnHood! Store (provisioning)",
+    "repo": "vpnhood/VpnHood.WHMCS",
+    "package": "vpnhoodhub.zip",
+    "packageLabel": "VpnHood! Hub",
+    "provides": {
+        "store": 1
+    }
+}

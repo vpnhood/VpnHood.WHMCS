@@ -287,10 +287,10 @@ git tag.
 - **`scripts/set-version.sh`** stamps `VERSION` into every module. `--check` verifies they all
   agree and exits non-zero if not (CI runs this after stamping). Run it locally any time to
   re-sync; it is idempotent.
-- **`.github/workflows/release.yml`** runs on every push to `main`: bump the patch number,
-  stamp it, commit `chore(release): vX.Y.Z [skip ci]`, tag `vX.Y.Z`, and publish a GitHub
-  Release. The `[skip ci]` marker plus an `if:` guard stop the release commit from
-  re-triggering the workflow.
+- **`.github/workflows/release.yml`** is run by hand (Actions → Release → Run workflow) —
+  nothing is released on push, a release is always a deliberate act. It bumps the version
+  (patch by default), stamps it, commits `Release vX.Y.Z`, tags, builds `vpnhoodhub.zip`
+  (bundling the `vpnhoodiap` release pinned in `IAP_VERSION`) and publishes a GitHub Release.
 
 Where the number lands, and why the two mechanisms differ:
 
@@ -305,6 +305,39 @@ Where the number lands, and why the two mechanisms differ:
 The connector repo (**VpnHood.WHMCS.Partner**) has the same `VERSION` + script + workflow, but
 versions **independently**: the two ship to different WHMCS installs on their own cadence. The
 Hub API contract is what couples them, not the version number.
+
+## Update notice & package contracts
+
+WHMCS has no update channel for third-party modules (its own updater covers the core only),
+so an install can sit years behind and nobody hears about it. Every VpnHood package therefore
+ships the same self-contained check, `modules/widgets/vpnhoodupdates.php`, which renders a
+**VpnHood! Modules** widget on the admin dashboard and the package table on our addon pages:
+what is installed, whether GitHub has a newer release, and whether the packages fit each other.
+It **only reports** — installing an update stays a deliberate human act.
+
+- **Discovery is by `vhcontract.json`**, a static file next to every module: who it is, which
+  package/repo it comes from, and the cross-module contract it `provides` or `requires`. A
+  static file (not a function) is the point: any module can read any other's declaration
+  without loading its code, which is what lets independently shipped packages cooperate.
+- **The `store` contract** is the surface `vpnhoodiap` reuses from `vpnhoodstore` (its
+  `ApiService` and the service properties provisioning writes). `vpnhoodstore` declares
+  `provides.store`, `vpnhoodiap` declares `requires.store`; a provider that is installed but too
+  old shows as a red mismatch, a provider that is absent is a supported shape (iap on a partner
+  install degrades on purpose). Bump the level only when that surface changes in a way an
+  older consumer would not survive. The connector does **not** provide `store` — iap never
+  reaches into it.
+- **Network only from the daily cron.** Each addon's `hooks.php` registers `DailyCronJob` →
+  `VpnHoodUpdateCheck::refresh()`; the cache (24 h, failures retried hourly) lives in
+  `tbladdonmodules` under `vpnhoodupdates`. Pages and the widget render the cache and never
+  call GitHub; "Check now" on an addon page forces a refresh. Unauthenticated GitHub API on
+  purpose — it runs on installs we do not own.
+- **The widget file is byte-identical in all four repos** (hub, partner, iap, sign-in) at the
+  same path — the filesystem de-duplicates, the last extract wins, every copy behaves the same.
+  **If you change it, change all four**, and never replace `modules/widgets/` on a server: it is
+  shared with WHMCS's own widgets (`deploy-dev.sh` overlays it).
+- The table groups by **package**, since that is what an admin installs; modules inside one
+  package that disagree on version mark it *half-deployed* and name the stale module, and such a
+  package never reads as "up to date".
 
 ## Conventions
 

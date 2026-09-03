@@ -1,0 +1,8 @@
+{
+    "module": "vpnhoodconfig",
+    "kind": "addon",
+    "label": "VpnHood! MANAGER Configuration",
+    "repo": "vpnhood/VpnHood.WHMCS",
+    "package": "vpnhoodhub.zip",
+    "packageLabel": "VpnHood! Hub"
+}

@@ -134,8 +134,11 @@ deploy_hub() {
   local d
   for d in "${dirs[@]}"; do deploy_dir "$REPO_ROOT" "$d"; done
   overlay_dir "$REPO_ROOT" includes/hooks
+  # modules/widgets holds WHMCS's OWN dashboard widgets too — overlay, never replace
+  overlay_dir "$REPO_ROOT" modules/widgets
   for d in "${dirs[@]}"; do verify_dir "$REPO_ROOT" "$d"; lint_dir "$d"; done
   lint_dir includes/hooks
+  lint_dir modules/widgets
 
   # Smoke check: the Hub API must answer with its OWN JSON envelope (an auth error
   # proves it boots). Matching a bare 'error' substring is not enough — a PHP fatal
@@ -169,6 +172,9 @@ deploy_partner() {
     verify_dir "$PARTNER_REPO" "$d"
     lint_dir "$d"
   done
+  # every package ships the same update-check widget at the same path
+  overlay_dir "$PARTNER_REPO" modules/widgets
+  lint_dir modules/widgets
 }
 
 deploy_iap() {
@@ -177,10 +183,12 @@ deploy_iap() {
   # hooks and gateways dirs are shared with other modules on the server: overlay, never replace
   overlay_dir "$IAP_REPO" includes/hooks
   overlay_dir "$IAP_REPO" modules/gateways
+  overlay_dir "$IAP_REPO" modules/widgets
   verify_dir "$IAP_REPO" modules/addons/vpnhoodiap
   lint_dir modules/addons/vpnhoodiap
   lint_dir includes/hooks
   lint_dir modules/gateways
+  lint_dir modules/widgets
 
   # IAP API smoke check: an active addon answers GET /v1/system/status; an inactive one
   # answers its fail-closed 404 problem+json. Anything else (HTML error page, 5xx)
