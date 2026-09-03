@@ -5,8 +5,9 @@
  *
  *   1. the buyer's FIRST key gets isDefaultKey=yes + accessCodeHash; a SECOND
  *      purchase never steals the default slot;
- *   2. the InvoiceRefunded hook terminates the refunded service by default —
- *      and deliberately keeps it when keepOnRefund=yes is set.
+ *   2. the InvoiceRefunded hook terminates a FULLY refunded service by default —
+ *      leaves a partially refunded one running, and deliberately keeps even a
+ *      fully refunded one when keepOnRefund=yes is set.
  *
  * ⚠ Places TWO real orders (real tokens at the access manager); both are
  * terminated and deleted in cleanup.
@@ -63,6 +64,47 @@ function placeKeyOrder(PDO $db, int $clientId, int $productId): array
     return ['order' => $orderId, 'invoice' => $invoiceId, 'service' => $serviceId];
 }
 
+/**
+ * Give money back on an invoice until $fraction of its total has been refunded in
+ * all, and return what this call booked (0 when that much was already back).
+ *
+ * This is the ONE place these tests write a row by hand instead of going through
+ * localAPI, and the reason is that the API cannot do it: `AddTransaction` refuses
+ * an invoice that is already Paid ("The system cannot modify the updated_at
+ * attribute on an invoice that is in the Paid status"), which every refundable
+ * invoice is. So the row is written in exactly the shape WHMCS's own admin Refund
+ * action produces — copied off a real refund on the dev box (invoice #613):
+ * `gateway_funds_out`, `refundid` pointing at the payment it reverses, the
+ * payment's own gateway/currency/rate. The hook reads that shape back; anything
+ * looser would test a fiction.
+ */
+function refundInvoice(PDO $db, int $invoiceId, float $fraction): float
+{
+    $invoice = one($db, 'SELECT total FROM tblinvoices WHERE id=?', [$invoiceId]);
+    if ($invoice === null) {
+        throw new RuntimeException("invoice #$invoiceId vanished");
+    }
+    $payment = one($db, 'SELECT id FROM tblaccounts WHERE invoiceid=? AND amountin>0 AND amountout=0 ORDER BY id LIMIT 1', [$invoiceId]);
+    if ($payment === null) {
+        throw new RuntimeException("invoice #$invoiceId carries no payment to refund");
+    }
+    $total = round((float)$invoice['total'], 2);
+    $already = (float) (one($db, 'SELECT COALESCE(SUM(amountout),0) s FROM tblaccounts WHERE invoiceid=? AND refundid>0', [$invoiceId])['s'] ?? 0);
+    $amount = round(($fraction >= 1.0 ? $total : round($total * $fraction, 2)) - $already, 2);
+    if ($amount <= 0) {
+        return 0.0;
+    }
+    $st = $db->prepare(
+        "INSERT INTO tblaccounts (userid, currency, gateway, date, description, amountin, fees,
+                                  amountout, rate, transid, invoiceid, refundid, type, relid)
+         SELECT userid, currency, gateway, NOW(), CONCAT('Refund of Transaction ID ', id), 0.00, 0.00,
+                ?, rate, CONCAT('refund_', id), invoiceid, id, 'gateway_funds_out', 0
+         FROM tblaccounts WHERE id = ?"
+    );
+    $st->execute([$amount, (int)$payment['id']]);
+    return $amount;
+}
+
 try {
     // -- 1. first key = default; second never steals it -----------------------
     $first = placeKeyOrder($db, (int)$buyer['id'], (int)$prod['id']);
@@ -91,19 +133,38 @@ try {
     // -- 2. refund revokes by default; keepOnRefund keeps deliberately --------
     require_once WEBROOT . '/includes/hooks/vpnhoodstore-refund-terminate.php';
 
-    // deliberate keep first: mark, refund-hook, assert survival
-    $svc = \WHMCS\Service\Service::find($second['service']);
-    $svc->serviceProperties->save(['keepOnRefund' => 'yes']);
-    vpnhoodstore_refundTerminateHook(['invoiceid' => $second['invoice']]);
-    (one($db, 'SELECT domainstatus FROM tblhosting WHERE id=?', [$second['service']])['domainstatus'] ?? '?') === 'Active'
-        ? ok('keepOnRefund=yes keeps the key running through a refund (the deliberate choice)')
-        : bad('keepOnRefund was ignored');
+    // a PARTIAL refund is the goodwill case (§8) and must never revoke — the bug
+    // that terminated a live key over a few dollars handed back
+    refundInvoice($db, $first['invoice'], 0.5);
+    vpnhoodstore_refundTerminateHook(['invoiceid' => $first['invoice']]);
+    (one($db, 'SELECT domainstatus FROM tblhosting WHERE id=?', [$first['service']])['domainstatus'] ?? '?') === 'Active'
+        ? ok('a PARTIAL refund leaves the key running (never revoke by accident)')
+        : bad('a partial refund terminated the service');
 
-    // default path: no mark → terminated
+    // the rest of the money goes back: the partial becomes full → terminated.
+    // This is the AMOUNT signal — the invoice is still Paid, the sum is what tells.
+    refundInvoice($db, $first['invoice'], 1.0);
     vpnhoodstore_refundTerminateHook(['invoiceid' => $first['invoice']]);
     (one($db, 'SELECT domainstatus FROM tblhosting WHERE id=?', [$first['service']])['domainstatus'] ?? '?') === 'Terminated'
-        ? ok('a refund revokes the key by default — money and service go back together')
-        : bad('refunded service was not terminated');
+        ? ok('refunds that add up to the invoice total revoke the key — money and service go back together')
+        : bad('fully refunded service was not terminated');
+
+    // deliberate keep, on the other signal: WHMCS marks the invoice Refunded
+    $svc = \WHMCS\Service\Service::find($second['service']);
+    $svc->serviceProperties->save(['keepOnRefund' => 'yes']);
+    refundInvoice($db, $second['invoice'], 1.0);
+    localAPI('UpdateInvoice', ['invoiceid' => $second['invoice'], 'status' => 'Refunded']);
+    vpnhoodstore_refundTerminateHook(['invoiceid' => $second['invoice']]);
+    (one($db, 'SELECT domainstatus FROM tblhosting WHERE id=?', [$second['service']])['domainstatus'] ?? '?') === 'Active'
+        ? ok('keepOnRefund=yes keeps the key running through a full refund (the deliberate choice)')
+        : bad('keepOnRefund was ignored');
+
+    // …and without the mark, the Refunded status alone revokes it
+    $svc->serviceProperties->save(['keepOnRefund' => 'no']);
+    vpnhoodstore_refundTerminateHook(['invoiceid' => $second['invoice']]);
+    (one($db, 'SELECT domainstatus FROM tblhosting WHERE id=?', [$second['service']])['domainstatus'] ?? '?') === 'Terminated'
+        ? ok('an invoice WHMCS marked Refunded revokes the key on its own')
+        : bad('invoice marked Refunded did not revoke the key');
 } catch (RuntimeException $e) {
     bad($e->getMessage());
 } finally {
