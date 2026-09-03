@@ -1,0 +1,8 @@
+{
+    "module": "vpnhoodverify",
+    "kind": "addon",
+    "label": "VpnHood! Email Verification",
+    "repo": "vpnhood/VpnHood.WHMCS",
+    "package": "vpnhoodhub.zip",
+    "packageLabel": "VpnHood! Hub"
+}

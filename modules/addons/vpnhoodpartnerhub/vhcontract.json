@@ -1,0 +1,8 @@
+{
+    "module": "vpnhoodpartnerhub",
+    "kind": "addon",
+    "label": "VpnHood! Partner Hub",
+    "repo": "vpnhood/VpnHood.WHMCS",
+    "package": "vpnhoodhub.zip",
+    "packageLabel": "VpnHood! Hub"
+}
