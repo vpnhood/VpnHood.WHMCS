@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 #
 # run-e2e.sh — browser (Playwright) tests for the hub store flows, against the
-# DEV WHMCS only: the checkout warning's three voices and the reseller CSV
-# delivery. Uploads e2e-state.php to the dev box (the specs drive scenarios
+# DEV WHMCS only: the checkout warning's three voices, the reseller CSV
+# delivery and the email-verification checkout hold. Uploads e2e-state.php to
+# the dev box (the specs drive scenarios
 # through it over SSH), installs Playwright on first run, and cleans up after.
 #
 # Usage: tests/e2e/run-e2e.sh [playwright args, e.g. cart-notice.spec.mjs]

@@ -80,22 +80,31 @@ enforcement: it owns no tables, keeps no verified-flag of its own, and treats
 
 - `vpnhoodverify.php` — settings, `_activate` (stamps the new-client cutoff), `_output`
   (admin status + "clients currently gated" count), `_clientarea` (the gate page).
-- `hooks.php` — the `ClientAreaPage` gate. **Lives inside the addon, not `includes/hooks/`,
-  on purpose:** WHMCS loads an addon's `hooks.php` only while that addon is active, which
-  makes deactivation a real kill switch for a module whose failure mode is locking every
-  client out of the portal.
-- `lib/VerifyGate.php` — settings reader, scope check, verified check, resend.
-- `templates/verify-email.tpl` — the gate page.
+- `hooks.php` — the `ClientAreaPage` gate, and the `AfterShoppingCartCheckout` hold that
+  sends an unverified client to the gate page instead of the payment gateway. **Lives
+  inside the addon, not `includes/hooks/`, on purpose:** WHMCS loads an addon's `hooks.php`
+  only while that addon is active, which makes deactivation a real kill switch for a module
+  whose failure mode is locking every client out of the portal.
+- `lib/VerifyGate.php` — settings reader, scope check, verified check, resend, gate URL,
+  and `checkoutHoldUrl()` — the whole checkout-hold decision, kept out of the hook so
+  `tests/integration/verify-checkout.test.php` can exercise it in-process.
+- `templates/verify-email.tpl` — the gate page (invoice-aware when reached from checkout).
 
 Scope is either `Every client` or `New clients only`, the latter keyed on
 `tblclients.datecreated >= CutoffDate` (stamped at activation). The cutoff exists because
 switching `EnableEmailVerification` on does **not** mail existing clients — gating them
 would bar people who were never sent a link.
 
-**Gates client-area pages only.** Not registration (WHMCS creates the client *then* mails
-the link — there is nothing to hook), not checkout (it would break
-register-and-order-in-one-step), not the admin area, and not `vpnhoodiap`'s `api.php`, so
-app-store purchases keep working throughout. The whitelist (`logout`, `verifyemail`,
+**Gates client-area pages, and holds the payment after checkout.** With WHMCS's
+*Automatically redirect to gateway*, a fresh checkout goes straight to an off-site gateway
+page no client-area hook can reach, so the checkout hook redirects an unverified client to
+the gate page before the gateway link is built. The order and invoice are still created
+(register-and-order-in-one-step keeps working); the unpaid invoice becomes payable once the
+address is confirmed. Not gated: registration (WHMCS creates the client *then* mails the
+link — there is nothing to hook), the admin area, API/`localAPI` orders and `vpnhoodiap`'s
+`api.php` — `AfterShoppingCartCheckout` fires for *every* order WHMCS creates, so the hold
+checks it is on `cart.php` with the order's owner logged in before acting. The whitelist
+(`logout`, `verifyemail`,
 `password-reset`, WHMCS's `/user/verify`, this addon's page, `vpnhoodiap`'s pages) is
 load-bearing: WHMCS's link expires after 60 minutes and its own recovery advice is to log
 in and request a new one. Any exception fails open.

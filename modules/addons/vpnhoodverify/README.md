@@ -26,16 +26,41 @@ is the only authority.
 **Gated:** client-area pages. An unverified client is redirected to a confirmation page
 that can mail them a fresh link.
 
+**Reworded:** WHMCS's own "Please check your email and follow the link…" banner gets
+*"Can't find it? Check your spam or junk folder."* appended, by a `ClientAreaFooterOutput`
+script emitted only while WHMCS shows that banner. Client-side because WHMCS 9 hands a
+`ClientAreaPage` hook no `LANG` to rewrite, and a `lang/overrides/` file would not ship or
+switch off with the addon. Only WHMCS's untouched English sentence is extended — another
+language or an existing override is left alone, and a theme without the stock
+`.verification-banner.email-verification` markup simply shows no hint.
+
+**Held:** the payment after checkout. WHMCS's *Automatically redirect to gateway* sends a
+fresh checkout straight to the payment gateway — an off-site page no client-area hook can
+reach — so without this a made-up address gets as far as a card form. The
+`AfterShoppingCartCheckout` hook sends an unverified client to the confirmation page
+instead of the gateway. The order and the invoice exist by then (WHMCS creates them before
+the hook fires); no money moves until the address is confirmed, after which the unpaid
+invoice is payable from the client area and the confirmation page links straight to it.
+Nothing else about ordering changes: register-and-order-in-one-step still works, and the
+gate only ever sees the clients it applies to (see *Applies To* below).
+
 **Not gated, deliberately:**
 
 - **Registration.** WHMCS creates the client record and *then* mails the link, so there is
   no "confirm before the account exists" step to hook into. Forcing verification always
   means *the account exists, but the portal stays shut*.
-- **Ordering / checkout.** Gating checkout would break register-and-order-in-one-step — a
-  brand-new client cannot possibly have clicked a link yet.
-- **The admin area.** `ClientAreaPage` fires client-side only.
-- **App-store purchases.** `vpnhoodiap`'s `api.php` is not a client-area page, so
-  subscriptions bought in the app keep working throughout.
+- **Order creation.** Refusing the checkout itself would break
+  register-and-order-in-one-step — a brand-new client cannot possibly have clicked a link
+  yet. Holding the payment instead keeps the flow and still keeps the card form behind the
+  confirmation.
+- **The admin area, and API orders.** `ClientAreaPage` fires client-side only.
+  `AfterShoppingCartCheckout`, note, fires for **every** order WHMCS creates — the admin
+  order form and `localAPI('AddOrder')` included, which is how the Partner Hub and
+  `vpnhoodiap` place theirs — so the hold acts only when the request is `cart.php` *and*
+  the logged-in client is the order's owner. Anywhere else a redirect-and-exit would kill
+  the caller mid-request.
+- **App-store purchases.** `vpnhoodiap`'s `api.php` is not a client-area page and does not
+  go through the cart, so subscriptions bought in the app keep working throughout.
 
 ## Settings
 
@@ -81,13 +106,28 @@ that bounced every page would make recovery impossible.
 | File | Purpose |
 |---|---|
 | `vpnhoodverify.php` | Settings, activation (cutoff stamp), admin status page, gate page |
-| `hooks.php` | The `ClientAreaPage` gate. Loaded by WHMCS only while the addon is active |
+| `hooks.php` | The `ClientAreaPage` gate and the `AfterShoppingCartCheckout` payment hold. Loaded by WHMCS only while the addon is active |
 | `lib/VerifyGate.php` | Shared settings/verification helpers used by both entry points |
 | `templates/verify-email.tpl` | The gate page |
 
 ## Verification (no local test tooling — use the dev WHMCS)
 
-Deploy with `scripts/deploy-dev.sh hub`, then at `https://whmcs-dev.vpnhood.com`:
+The checkout hold has two automated checks (deploy first with `scripts/deploy-dev.sh hub`):
+
+- `tests/integration/verify-checkout.test.sh` — fires `AfterShoppingCartCheckout` through
+  WHMCS's `run_hook()` for a fresh unconfirmed client with an unpaid order (held) and again
+  once WHMCS marks the address confirmed (not held), and checks the gate-URL and
+  pending-invoice helpers. Self-contained; creates and deletes one throwaway client.
+- `tests/e2e/run-e2e.sh verify-checkout.spec.mjs` — the held client's side: signs in,
+  sees the confirmation page name the waiting invoice (and ignore anyone else's), and
+  cannot open the invoice itself until confirmed.
+
+Neither drives the real cart form: the dev install currently rejects every
+register-at-checkout POST with *No payment gateways available* (reproduced with every
+VpnHood hook disabled — a dev gateway-config problem). Until that is fixed, step 7 below is
+the manual check.
+
+For the rest, deploy with `scripts/deploy-dev.sh hub`, then at `https://whmcs-dev.vpnhood.com`:
 
 1. Addon inactive → the client area behaves normally (proves the kill switch).
 2. Activate; confirm the admin page shows the cutoff stamped with today and enforcement
@@ -98,3 +138,6 @@ Deploy with `scripts/deploy-dev.sh hub`, then at `https://whmcs-dev.vpnhood.com`
    opens the portal. Confirm `tblusers.email_verified_at` is now set.
 5. Switch to **Every client** → the existing test client is gated too; verifying opens it.
 6. Confirm admin login and `modules/addons/vpnhoodpartnerhub/api.php` are unaffected.
+7. Register a fresh client *at checkout* (new-customer form on the cart) → the confirmation
+   page opens instead of the gateway, saying the order is saved and unpaid. Confirm the
+   address → the page links to the invoice, and paying it provisions as usual.

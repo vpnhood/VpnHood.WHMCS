@@ -9,7 +9,12 @@
  * call — the notice only reads tblhosting), and the bulk scenario places a
  * real qty-2 CSV order whose batch tokens `clean` expires + disables again.
  *
- * Usage: E2E_CLIENT_PASSWORD=… php e2e-state.php <clean|onetime-key|renewing|bulk>
+ * `held-client` creates what the checkout hold leaves behind — a fresh
+ * unconfirmed client (e2e-verify-*@vpnhood.test, password E2E_CLIENT_PASSWORD)
+ * with one unpaid paymenthood order — and prints its ids; `drop-verify-clients`
+ * removes every such client together with its orders and invoices.
+ *
+ * Usage: E2E_CLIENT_PASSWORD=… php e2e-state.php <clean|onetime-key|renewing|bulk|held-client|drop-verify-clients>
  */
 
 require '/home/whmcsdev/web/whmcs-dev.vpnhood.com/public_html/init.php';
@@ -175,6 +180,49 @@ switch ($scenario) {
         echo json_encode(['clientId' => $clientId, 'serviceId' => $serviceId, 'orderId' => $orderId]) . "\n";
         break;
 
+    case 'held-client':
+        $password = getenv('E2E_CLIENT_PASSWORD') ?: '';
+        if ($password === '') {
+            fail('E2E_CLIENT_PASSWORD is required to create the held client');
+        }
+        $email = 'e2e-verify-' . bin2hex(random_bytes(4)) . '@vpnhood.test';
+        $result = api('AddClient', [
+            'firstname'      => 'E2E',
+            'lastname'       => 'Held',
+            'email'          => $email,
+            'password2'      => $password,
+            'country'        => 'US',
+            'skipvalidation' => true,
+            'noemail'        => true,
+        ]);
+        $heldId = (int) $result['clientid'];
+        // the order as checkout leaves it: unpaid, unaccepted, gateway paymenthood
+        $add = api('AddOrder', [
+            'clientid'       => $heldId,
+            'pid'            => [PID_ONETIME],
+            'billingcycle'   => ['onetime'],
+            'paymentmethod'  => 'paymenthood',
+            'noemail'        => true,
+            'noinvoiceemail' => true,
+        ]);
+        echo json_encode([
+            'clientId'  => $heldId,
+            'email'     => $email,
+            'orderId'   => (int) $add['orderid'],
+            'invoiceId' => (int) ($add['invoiceid'] ?? 0),
+        ]) . "\n";
+        break;
+    case 'drop-verify-clients':
+        // DeleteClient takes the orders, invoices and (unprovisioned) services with it;
+        // deleteusers drops the tblusers row, so the address is registrable again
+        $ids = Capsule::table('tblclients')
+            ->where('email', 'like', 'e2e-verify-%@vpnhood.test')
+            ->pluck('id')->all();
+        foreach ($ids as $id) {
+            localAPI('DeleteClient', ['clientid' => (int) $id, 'deleteusers' => true]);
+        }
+        echo json_encode(['dropped' => count($ids)]) . "\n";
+        break;
     default:
         fail('unknown scenario: ' . $scenario);
 }

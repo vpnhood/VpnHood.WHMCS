@@ -15,7 +15,7 @@
  * existing the moment the addon is deactivated (WHMCS only loads an active addon's
  * hooks.php).
  *
- * @see hooks.php          the ClientAreaPage gate
+ * @see hooks.php          the ClientAreaPage gate and the checkout-to-gateway hold
  * @see lib/VerifyGate.php the shared state, and why WHMCS is the only authority
  */
 
@@ -235,8 +235,11 @@ function vpnhoodverify_gatedClientCount(array $settings): int
 
 /**
  * The gate page — the only client-area page this addon serves, and the only place
- * the redirect sends people. It exists to be escapable: the single action is to
+ * the redirects send people. It exists to be escapable: the single action is to
  * mail a fresh confirmation link, because WHMCS's own expires after 60 minutes.
+ *
+ * Arriving from checkout, the page also knows which invoice is waiting, so the
+ * client is told their order is safe and, once confirmed, is pointed straight at it.
  */
 function vpnhoodverify_clientarea($vars): array
 {
@@ -249,6 +252,10 @@ function vpnhoodverify_clientarea($vars): array
     // Someone who confirmed in another tab should not be stuck staring at this page.
     $verified = $email !== '' && VerifyGate::isEmailVerified($email);
 
+    // The checkout hold carries the invoice on the query string; the resend form
+    // posts it back so the pointer survives a round trip.
+    $invoiceId = VerifyGate::pendingInvoiceId($clientId, (int) ($_REQUEST['invoice'] ?? 0));
+
     return [
         'pagetitle'    => 'Confirm your email address',
         'breadcrumb'   => ['index.php?m=' . VerifyGate::MODULE => 'Confirm your email address'],
@@ -259,6 +266,7 @@ function vpnhoodverify_clientarea($vars): array
             'resent'    => $sent,
             'attempted' => $attempted,
             'verified'  => $verified,
+            'invoiceId' => $invoiceId,
             'module'    => VerifyGate::MODULE,
         ],
     ];
