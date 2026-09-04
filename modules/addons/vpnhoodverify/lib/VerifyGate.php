@@ -106,6 +106,101 @@ class VerifyGate
     }
 
     /**
+     * Whether the current request is the shopping cart itself (cart.php), as
+     * opposed to the admin area, an API call, a cron run or a CLI script — all of
+     * which also fire AfterShoppingCartCheckout when they create an order.
+     */
+    public static function isCartRequest(): bool
+    {
+        return basename((string) ($_SERVER['SCRIPT_NAME'] ?? '')) === 'cart.php';
+    }
+
+    /** The client an order belongs to, or 0 when there is no such order. */
+    public static function orderClientId(int $orderId): int
+    {
+        if ($orderId <= 0) {
+            return 0;
+        }
+
+        return (int) Capsule::table('tblorders')->where('id', $orderId)->value('userid');
+    }
+
+    /**
+     * The invoice the gate page should point at once the address is confirmed:
+     * the given one, provided it belongs to this client and is still unpaid.
+     * Anything else returns 0 — the id arrives on the query string, and a client
+     * must never be shown a link to an invoice that is not theirs.
+     */
+    public static function pendingInvoiceId(int $clientId, int $invoiceId): int
+    {
+        if ($clientId <= 0 || $invoiceId <= 0) {
+            return 0;
+        }
+
+        $owned = Capsule::table('tblinvoices')
+            ->where('id', $invoiceId)
+            ->where('userid', $clientId)
+            ->where('status', 'Unpaid')
+            ->exists();
+
+        return $owned ? $invoiceId : 0;
+    }
+
+    /**
+     * Absolute URL of the gate page, optionally carrying the invoice that is
+     * waiting on the confirmation. Absolute because the checkout hook has no
+     * $vars['systemurl'] to lean on the way ClientAreaPage does.
+     */
+    public static function gateUrl(int $invoiceId = 0): string
+    {
+        $systemUrl = rtrim((string) Capsule::table('tblconfiguration')
+            ->where('setting', 'SystemURL')
+            ->value('value'), '/');
+
+        $url = $systemUrl . '/index.php?m=' . self::MODULE;
+
+        return $invoiceId > 0 ? $url . '&invoice=' . $invoiceId : $url;
+    }
+
+    /**
+     * The checkout hold, as a decision: where a freshly checked-out order should
+     * be redirected instead of the payment gateway, or '' to let WHMCS carry on.
+     *
+     * '' whenever this is not the buyer's own cart request. WHMCS fires
+     * AfterShoppingCartCheckout for every order it creates — localAPI('AddOrder')
+     * from the Partner Hub, vpnhoodiap and scripts, and the admin order form
+     * included — and a redirect-and-exit there would kill the caller mid-request.
+     * So the order must come from cart.php with its owner logged in, be in scope,
+     * and belong to an address WHMCS has not seen confirmed.
+     */
+    public static function checkoutHoldUrl(int $orderId, int $invoiceId): string
+    {
+        if (!self::isCartRequest()) {
+            return '';
+        }
+
+        $settings = self::settings();
+        if (!$settings['enabled']) {
+            return '';
+        }
+
+        $clientId = self::orderClientId($orderId);
+        if ($clientId <= 0 || $clientId !== (int) ($_SESSION['uid'] ?? 0)) {
+            return '';
+        }
+        if (!self::clientInScope($clientId, $settings)) {
+            return '';
+        }
+
+        $email = self::clientEmail($clientId);
+        if ($email === '' || self::isEmailVerified($email)) {
+            return '';
+        }
+
+        return self::gateUrl($invoiceId);
+    }
+
+    /**
      * Whether WHMCS itself has seen this address confirmed, read per user from
      * tblusers.email_verified_at. Deliberately independent of the global
      * EnableEmailVerification switch: that setting decides whether WHMCS *mails*
@@ -150,6 +245,37 @@ class VerifyGate
             logModuleCall(self::MODULE, 'sendVerificationEmail', $email, $e->getMessage(), '');
             return false;
         }
+    }
+
+    /**
+     * WHMCS's stock wording for its own "verify your email" banner, and what to add
+     * to it. The banner sits at the top of every client-area page (the gate page
+     * included) while an address is unconfirmed, and never mentions the one place
+     * the mail usually is.
+     */
+    private const WHMCS_VERIFY_BANNER = 'Please check your email and follow the link to verify your email address.';
+    private const SPAM_HINT = " Can't find it? Check your spam or junk folder.";
+
+    /**
+     * Footer script that appends the spam hint to WHMCS's verification banner.
+     *
+     * The banner is `.verification-banner.email-verification` in WHMCS's stock
+     * theme and the ones built on it (lagom2 included); the hint goes onto the
+     * text node holding the sentence, so the Resend button and the close control
+     * are untouched. Matching the exact English sentence is the language guard:
+     * anything else — a translation, a lang/overrides/ rewrite — is left as it is.
+     */
+    public static function spamHintScript(): string
+    {
+        $sentence = json_encode(self::WHMCS_VERIFY_BANNER, JSON_THROW_ON_ERROR);
+        $hint = json_encode(self::SPAM_HINT, JSON_THROW_ON_ERROR);
+
+        return '<script>(function(){'
+            . 'var b=document.querySelector(".verification-banner.email-verification");if(!b)return;'
+            . 'var w=document.createTreeWalker(b,NodeFilter.SHOW_TEXT),n;'
+            . 'while((n=w.nextNode())){if(n.nodeValue.indexOf(' . $sentence . ')!==-1){'
+            . 'n.nodeValue=n.nodeValue.replace(' . $sentence . ',' . $sentence . '+' . $hint . ');return;}}'
+            . '})();</script>';
     }
 
     /**

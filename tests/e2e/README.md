@@ -5,7 +5,16 @@ Playwright-driven scripts against `https://whmcs-dev.vpnhood.com`. Two kinds liv
 - **Visual prep scripts** (`*-configure.mjs`) — open a headed browser, drive the admin
   UI up to a point, then **stop and leave the browser open** so a human reviews and
   confirms (they never click Save themselves).
-- **Automated e2e tests** — none yet; add future Playwright suites here.
+- **Automated e2e tests** (`*.spec.mjs`, run through `run-e2e.sh`) — the checkout
+  warning (`cart-notice`), reseller CSV delivery (`reseller-csv`), and the email
+  verification checkout hold (`verify-checkout`: a held client — fresh, unconfirmed,
+  one unpaid order, created by the state driver — signs in and finds the confirmation
+  page naming the waiting invoice, with the invoice itself gated). The hook that does
+  the holding is covered by `tests/integration/verify-checkout.test.sh`.
+
+  Known dev limitation: the dev install rejects every register-at-checkout POST with
+  *No payment gateways available* (reproduced with all VpnHood hooks disabled), so no
+  spec drives the real cart form to completion.
 
 ## Setup
 
