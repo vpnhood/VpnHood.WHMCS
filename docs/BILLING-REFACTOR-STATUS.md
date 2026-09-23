@@ -23,11 +23,11 @@ can be swapped later without touching the apps.
 | [VpnHood.WHMCS.Iap](https://github.com/vpnhood/VpnHood.WHMCS.Iap) (public) | `main` | The whole PHP module: addon `vpnhoodiap`, gateway `vpnhoodiappay`, hooks, unit + integration tests, release workflow. Own version stream. |
 | VpnHood.WHMCS (this repo) | `main` | Hub modules (`vpnhoodstore`, `vpnhoodconfig`, `vpnhoodpartnerhub`) + release workflow bundling vpnhoodiap verbatim (`IAP_VERSION` pin). `scripts/deploy-dev.sh iap` deploys the sibling Iap repo to dev. |
 | VpnHood.WHMCS.Partner | `main` | Partner connector + release workflow, same vpnhoodiap bundling. |
-| VpnHood (client) | `refactor/billing-abstractions` | `src/AppLib/Portal` (C# Portal API client: auth/order/account providers), `src/AppLib/Stores/AppStore` (StoreKit 2 + Sign in with Apple), Android wiring behind `AppConfigs.PortalBaseUri` (null = legacy Store.Server), tests in `VpnHood.AppLib.Test` (`PortalTest`, `TestPortalServer`). |
+| VpnHood (client) | `refactor/billing-abstractions` | `src/AppLib/VpnHood.AppLib.Portal` (C# Portal API client: auth/order/account providers), `src/AppLib/VpnHood.AppLib.Stores.AppStore` (StoreKit 2 + Sign in with Apple), Android wiring behind `AppConfigs.PortalBaseUri` (null = legacy Store.Server), tests in `VpnHood.AppLib.Test` (`PortalTest`, `TestPortalServer`). |
 
 Docs inside the repos: Iap `README.md` + `CLAUDE.md` (module architecture, API
 contract, test harness), this repo's [ARCHITECTURE.md](ARCHITECTURE.md),
-`VpnHood/src/AppLib/Stores/AppStore/swift/README.md` (Swift facade
+`VpnHood/src/AppLib/VpnHood.AppLib.Stores.AppStore/swift/README.md` (Swift facade
 contract).
 
 ## Shipped state (2026-08-26)
