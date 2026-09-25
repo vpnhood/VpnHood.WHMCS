@@ -12,7 +12,11 @@
  *
  * Request body: JSON  { "action": "...", ...params }
  * Response:     JSON  { "success": true, "data": {...} }  or
- *                     { "success": false, "error": "..." }
+ *                     { "success": false, "error": "...", "code"?: "...", "details"?: {...} }
+ *
+ * Every response carries X-Vpnhood-Hub-Features: what this Hub supports. A connector
+ * promises a safe retry only when it lists idempotency-v1; a Hub that predates the header
+ * sends none.
  */
 
 use WHMCS\Module\Addon\VpnHoodPartnerHub\ApiException;
@@ -29,6 +33,7 @@ require_once __DIR__ . '/lib/Auth.php';
 require_once __DIR__ . '/lib/PartnerApiController.php';
 
 header('Content-Type: application/json; charset=utf-8');
+header('X-Vpnhood-Hub-Features: ' . PartnerApiController::FEATURES);
 
 $repo = new PartnerRepository();
 $remoteIp = $_SERVER['REMOTE_ADDR'] ?? '';
@@ -62,8 +67,16 @@ try {
     vpnhoodpartnerhub_respond(200, ['success' => true, 'data' => $data]);
 } catch (ApiException $e) {
     $status = $e->getHttpStatus();
-    $repo->log($partner['id'] ?? null, $action, $remoteIp, $status, $raw ?? null, $e->getMessage());
-    vpnhoodpartnerhub_respond($status, ['success' => false, 'error' => $e->getMessage()]);
+    $payload = ['success' => false, 'error' => $e->getMessage()];
+    if ($e->getErrorCode() !== '') {
+        $payload['code'] = $e->getErrorCode();
+    }
+    if ($e->getDetails() !== []) {
+        $payload['details'] = $e->getDetails();
+    }
+    $repo->log($partner['id'] ?? null, $action, $remoteIp, $status, $raw ?? null,
+        $e->getErrorCode() !== '' ? '[' . $e->getErrorCode() . '] ' . $e->getMessage() : $e->getMessage());
+    vpnhoodpartnerhub_respond($status, $payload);
 } catch (\Throwable $e) {
     logModuleCall('vpnhoodpartnerhub', 'api', $action, $e->getMessage(), $e->getTraceAsString());
     $repo->log($partner['id'] ?? null, $action, $remoteIp, 500, $raw ?? null, $e->getMessage());

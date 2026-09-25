@@ -22,9 +22,13 @@ if (!defined("WHMCS")) {
 
 use WHMCS\Database\Capsule;
 
+require_once __DIR__ . '/lib/ApiException.php';
 require_once __DIR__ . '/lib/PartnerRepository.php';
+require_once __DIR__ . '/lib/PartnerApiController.php';
 
 use WHMCS\Module\Addon\VpnHoodPartnerHub\PartnerRepository;
+use WHMCS\Module\Addon\VpnHoodPartnerHub\PurchaseProcessor;
+use WHMCS\Module\Addon\VpnHoodPartnerHub\PurchaseRepository;
 
 /**
  * Addon configuration / metadata.
@@ -108,6 +112,10 @@ function vpnhoodpartnerhub_activate(): array
             });
         }
 
+        // The purchase records are also created on first use (an installed Hub never re-runs
+        // this); doing it here back-fills the orders placed so far right away.
+        (new PurchaseRepository())->ensureReady(30);
+
         return [
             'status'      => 'success',
             'description' => 'VpnHood Partner Hub tables created successfully.',
@@ -126,8 +134,9 @@ function vpnhoodpartnerhub_activate(): array
  * partner credential during a routine deactivate/reactivate, breaking all connectors
  * (their stored API keys no longer matched anything). Reactivation is harmless: activate()
  * only creates tables that do not exist. To remove the module's data permanently, drop the
- * mod_vpnhood_partner_log / mod_vpnhood_partner_products / mod_vpnhood_partners tables
- * manually after uninstalling.
+ * mod_vpnhood_partner_log / mod_vpnhood_partner_purchases / mod_vpnhood_partner_products /
+ * mod_vpnhood_partners tables manually after uninstalling, and delete the
+ * VpnHoodPartnerHubPurchasesReady row of tblconfiguration.
  */
 function vpnhoodpartnerhub_deactivate(): array
 {
@@ -249,6 +258,19 @@ function vpnhoodpartnerhub_output(array $vars): void
                 $notice = 'Partner removed.';
                 $noticeType = 'success';
                 $action = 'list';
+            } elseif ($sub === 'purchase_retry' || $sub === 'purchase_release') {
+                $partnerId = (int) ($_POST['partner_id'] ?? 0);
+                $partner = $repo->getPartner($partnerId);
+                if ($partner === null) {
+                    throw new \RuntimeException('Partner not found.');
+                }
+                $processor = new PurchaseProcessor($repo, new PurchaseRepository(), $partner);
+                $purchaseId = (int) ($_POST['purchase_id'] ?? 0);
+                $notice = htmlspecialchars($sub === 'purchase_retry'
+                    ? $processor->retry($purchaseId)
+                    : $processor->release($purchaseId, !empty($_POST['refund_done'])));
+                $action = 'edit';
+                $_REQUEST['id'] = $partnerId;
             }
         } catch (\Throwable $e) {
             $notice = 'Error: ' . htmlspecialchars($e->getMessage());
@@ -274,6 +296,16 @@ function vpnhoodpartnerhub_renderList(PartnerRepository $repo, string $modulelin
 {
     $partners = $repo->allPartnersWithBalance();
 
+    $attention = [];
+    foreach ((new PurchaseRepository())->needingAttention(null) as $purchase) {
+        $attention[(int) $purchase['partner_id']] = ($attention[(int) $purchase['partner_id']] ?? 0) + 1;
+    }
+    foreach ($attention as $partnerId => $count) {
+        echo '<div class="alert alert-warning">Partner #' . $partnerId . ' has <b>' . $count
+            . '</b> purchase(s) needing attention. <a href="' . $modulelink . '&action=edit&id=' . $partnerId
+            . '#vh-attention">Review them</a>.</div>';
+    }
+
     echo '<p><a href="' . $modulelink . '&action=new" class="btn btn-primary">+ Add Partner</a></p>';
     echo '<table class="table table-striped"><thead><tr>'
         . '<th>ID</th><th>Client</th><th>API Key</th>'
@@ -296,7 +328,7 @@ function vpnhoodpartnerhub_renderList(PartnerRepository $repo, string $modulelin
             . '<td>' . (int) $p['product_count'] . '</td>'
             . '<td><a class="btn btn-sm btn-default" href="' . $modulelink . '&action=edit&id=' . (int) $p['id'] . '">Manage</a> '
             . '<form method="post" action="' . $modulelink . '" style="display:inline"'
-            . ' onsubmit="return confirm(\'Delete this partner? Its product mappings and logs are removed. This cannot be undone.\');">'
+            . ' onsubmit="return confirm(\'Delete this partner? Its product mappings, purchase records and logs are removed. This cannot be undone.\');">'
             . vpnhoodpartnerhub_csrfField()
             . '<input type="hidden" name="do" value="partner_delete">'
             . '<input type="hidden" name="id" value="' . (int) $p['id'] . '">'
@@ -407,6 +439,77 @@ function vpnhoodpartnerhub_renderEditForm(PartnerRepository $repo, string $modul
     echo '</select> ';
     echo '<button class="btn btn-success">Add Product</button>';
     echo '</form>';
+
+    vpnhoodpartnerhub_renderAttention($modulelink, $partner);
+}
+
+/**
+ * Purchases a person must finish or close: needs_reconciliation, and requests that died
+ * midway. Retry only re-checks and reads the key; Release frees a key once nothing it bought
+ * remains. Neither orders, pays or provisions — that stays with the person, on the service.
+ */
+function vpnhoodpartnerhub_renderAttention(string $modulelink, array $partner): void
+{
+    $purchases = (new PurchaseRepository())->needingAttention((int) $partner['id']);
+    echo '<hr><h4 id="vh-attention">Purchases needing attention</h4>';
+    if ($purchases === []) {
+        echo '<p class="text-muted">None. Every purchase of this partner finished or was rolled back.</p>';
+        return;
+    }
+
+    $clientId = (int) $partner['client_id'];
+    echo '<table class="table table-condensed"><thead><tr><th>Purchase</th><th>Reference / key</th>'
+        . '<th>Order / invoice / service</th><th>State</th><th>Problem</th><th></th></tr></thead><tbody>';
+    foreach ($purchases as $p) {
+        $links = [];
+        if ((int) $p['order_id'] > 0) {
+            $links[] = '<a href="orders.php?action=view&id=' . (int) $p['order_id'] . '">order #' . (int) $p['order_id'] . '</a>';
+        }
+        if ((int) $p['invoice_id'] > 0) {
+            $links[] = '<a href="invoices.php?action=edit&id=' . (int) $p['invoice_id'] . '">invoice #' . (int) $p['invoice_id'] . '</a>';
+        }
+        if ((int) $p['service_id'] > 0) {
+            $links[] = '<a href="clientsservices.php?userid=' . $clientId . '&id=' . (int) $p['service_id'] . '">service #'
+                . (int) $p['service_id'] . '</a>';
+        }
+        $hidden = vpnhoodpartnerhub_csrfField()
+            . '<input type="hidden" name="partner_id" value="' . (int) $partner['id'] . '">'
+            . '<input type="hidden" name="purchase_id" value="' . (int) $p['id'] . '">';
+        echo '<tr>'
+            . '<td>#' . (int) $p['id'] . '<br><small class="text-muted">' . htmlspecialchars((string) $p['updated_at']) . '</small></td>'
+            . '<td>' . htmlspecialchars((string) $p['customer_reference']) . '<br><small class="text-muted">'
+            . htmlspecialchars((string) ($p['idempotency_key'] ?? '(no key)')) . '</small></td>'
+            . '<td>' . ($links ? implode('<br>', $links) : '—') . '</td>'
+            . '<td>' . htmlspecialchars(str_replace('_', ' ', (string) $p['state'])) . '</td>'
+            . '<td style="max-width:28em">' . htmlspecialchars((string) ($p['last_error'] ?: 'the request stopped midway')) . '</td>'
+            . '<td style="white-space:nowrap">'
+            . '<form method="post" action="' . $modulelink . '" style="margin-bottom:4px">' . $hidden
+            . '<input type="hidden" name="do" value="purchase_retry"><button class="btn btn-xs btn-primary">Retry</button></form>'
+            . '<form method="post" action="' . $modulelink . '" onsubmit="return confirm(\'Release this purchase? Its key will buy a NEW order on the next request.\');">'
+            . $hidden . '<input type="hidden" name="do" value="purchase_release">'
+            . '<label style="font-weight:normal"><input type="checkbox" name="refund_done" value="1"> Refund done</label> '
+            . '<button class="btn btn-xs btn-default">Release</button></form>'
+            . '</td></tr>';
+    }
+    echo '</tbody></table>';
+
+    echo '<details><summary><b>Paid but not provisioned: what to check before pressing Create on the service</b></summary>'
+        . '<p>A token request can outlive the request that sent it, and the Hub never repeats provisioning, so a'
+        . ' second Create could mint a second key. An error message alone proves nothing either: the module can'
+        . ' create the token and then fail reading its code or saving its id. Establish what the original token'
+        . ' creation did first, for this customer id and order id:</p><ol>'
+        . '<li><b>The tokens of this customer and order</b> on the access server (VpnHood! MANAGER, or'
+        . ' <code>GET /api/projects/{projectId}/access-tokens?customerId=…&amp;orderId=…&amp;shopId=WHMCS</code>).'
+        . ' A token there is the outcome.</li>'
+        . '<li><b>Nothing listed?</b> Then only a finished request makes that final: the access server\'s request log'
+        . ' must show every <code>POST …/projects/{projectId}/access-tokens</code> since the order was'
+        . ' placed with its "Request finished" line (or the service restarted since).</li>'
+        . '<li><b>Why it failed</b>: WHMCS\'s Activity Log ("Module Create Failed - Service ID: …") and Utilities →'
+        . ' Module Queue name the error; the Module Log has the details when module debug logging is on. The'
+        . ' purchase\'s problem text above repeats it. Do not use the Module Queue\'s Retry — it is a Create.</li></ol>'
+        . '<p>A token exists → store its id on the service (<code>accessTokenId</code>; <code>bulkDelivery</code> = yes for'
+        . ' a batch) and set the service Active — <b>never press Create then</b>. Confirmed no token, and every request'
+        . ' finished → press Create on the service. Then <b>Retry</b> here. Anything unresolved stays here.</p></details>';
 }
 
 /** Human label for a WHMCS "Payment Type" (free|onetime|recurring). */

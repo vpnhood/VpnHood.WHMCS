@@ -114,15 +114,21 @@ Turns our WHMCS into a partner-scoped wholesale API. **It adds only partner mana
 a secured API; it does not own credit or provisioning.**
 
 - `vpnhoodpartnerhub.php` — addon config, `_activate`/`_deactivate` (table create/drop),
-  `_output` (admin UI for partners + product mappings + credentials).
+  `_output` (admin UI for partners + product mappings + credentials + purchases needing
+  attention).
 - `api.php` — public POST/JSON endpoint. Bootstraps WHMCS via `init.php`, authenticates,
-  dispatches, logs.
+  dispatches, logs; sends `X-Vpnhood-Hub-Features` on every response.
 - `lib/Auth.php` — key/secret auth (`X-Vpnhood-Key` / `X-Vpnhood-Secret`), status + IP gating.
-- `lib/PartnerApiController.php` — the actions. Provisioning via WHMCS `localAPI`
-  (`AddOrder`→`AcceptOrder`), settled from **native WHMCS credit**, then reads the access
-  code back through `ApiService`/`Helper`.
+- `lib/PartnerApiController.php` — the actions: request validation and dispatch.
+- `lib/PurchaseProcessor.php` — ordering as a sequence of confirmed steps: `AddOrder`,
+  payment from **native WHMCS credit**, `AcceptOrder`, then the access code read back through
+  `ApiService`/`Helper`; resume, `linkOrder`, and the admin Retry/Release.
+- `lib/PurchaseRepository.php` — `mod_vpnhood_partner_purchases`, its first-use initialization,
+  the named locks, and the footprint queries.
 - `lib/PartnerRepository.php` — data access + native credit reads.
-- `lib/ApiException.php` — carries an HTTP status for structured error responses.
+- `lib/LocalApi.php` — `localAPI` with failures turned into readable 422s (see below).
+- `lib/ApiException.php` — carries an HTTP status, and optionally a machine-readable `code`
+  and `details`, for structured error responses.
 
 ## Data model (Partner Hub)
 
@@ -147,10 +153,30 @@ mod_vpnhood_partner_products
 
 mod_vpnhood_partner_log
   id, partner_id, action, remote_ip, http_status, request, response, created_at
+
+mod_vpnhood_partner_purchases
+  id, partner_id, client_id,
+  idempotency_key (nullable, ascii_bin), customer_reference (≤191, nullable),
+  product_id, billing_cycle            — the request that bought it
+  order_id, invoice_id, service_id     — once AddOrder ran
+  state, last_error, created_at, updated_at
+  UNIQUE(partner_id, idempotency_key), UNIQUE(order_id), INDEX(partner_id, customer_reference), INDEX(state)
 ```
 
 **Credit is NOT stored here** — it is the native WHMCS client credit
 (`tblclients.credit`, history in `tblcredit`). This is intentional.
+
+`mod_vpnhood_partner_purchases` has one row per Hub order, keyed or not (a keyless order of
+quantity N is N rows). `state` is the last step whose result is **confirmed**:
+`created → ordered → paid → provisioned → delivered`, or `rolled_back`, `needs_reconciliation`.
+The Hub has no upgrade step, so `PurchaseRepository::ensureReady()` creates the table on first
+use (`_activate` calls it too) under a named init lock, back-fills a keyless `delivered` row for
+every order the request log answered with 200 (insert-if-absent by order id, so an interrupted
+run is resumed), then sets `tblconfiguration.VpnHoodPartnerHubPurchasesReady`. `order` and
+`linkOrder` wait for it (20 s, then `409 initializing`): a guard reading a half back-filled table
+could miss a legacy order and buy twice. The index names are explicit because Laravel's
+generated ones exceed MariaDB's 64 characters; a creation that fails midway drops the table so
+the next request starts over.
 
 ## Request lifecycle — `order` action
 
@@ -159,17 +185,100 @@ mod_vpnhood_partner_log
    `resolveBillingCycle` picks the cycle: the connector's requested `billingCycle` when it is
    one of the product's available cycles, else the mapping's default (an unsupported requested
    cycle is rejected with `422`).
-3. For each unit: `placeSingleOrder`:
-   1. `localAPI('AddOrder')` — creates order + invoice; WHMCS auto-applies the client's
-      credit to the invoice.
-   2. `assertInvoicePaid` — **before provisioning**, require invoice `Paid`; otherwise
-      roll back and throw `402`. Rollback is `CancelOrder` then `DeleteOrder` (WHMCS refuses
-      to delete an order unless it is Cancelled/Fraud), and both results are logged to
-      `mod_vpnhood_partner_log` (action `rollback`) so an incomplete teardown is never silent.
-   3. `localAPI('AcceptOrder', autosetup)` — runs `vpnhoodstore_CreateAccount`.
-   4. `readDelivery` — read `accessTokenId` from the service's `serviceProperties` and
-      fetch the access code via `ApiService::getAccessCode` (or CSV for bulk).
-4. Response: `{ keys: [{ upstreamOrderId, customerReference, deliveryType, accessTokenId + accessCode | csv }] }`.
+3. **With an `idempotencyKey`** (`PurchaseProcessor::orderKeyed`; the unit is always one):
+   under a MariaDB named lock on (partner, key) — `GET_LOCK`, 20 s, else `409 in_progress` —
+   look the key up.
+   - No purchase: unless `confirmNewPurchase`, the **legacy guard** refuses with `409 reconcile`
+     when live keyless orders of this partner carry the same `customerReference` (a response
+     lost under an older connector). Otherwise create the row and run the steps below.
+   - A purchase: the request must match it (product, cycle, reference — else `409
+     key_mismatch`). `delivered` replays its current delivery (`replayed: true`) while the
+     service is Active or Suspended, `409 key_spent` once it is terminated or cancelled;
+     `rolled_back` starts over; `needs_reconciliation` answers `409`; any other state **resumes**.
+4. **Without a key**, each unit gets a row and runs the steps — every call buys, as before.
+5. The steps, each saving its result before the next starts:
+   1. `AddOrder` → `ordered`. The request carries the purchase id in the admin-only product
+      custom field `hubPurchaseId` (created on first use per product), so WHMCS itself writes it
+      onto the service — the footprint that finds the order if this request dies before saving
+      its ids. A rejected `AddOrder` → `rolled_back` and `422`.
+   2. **Payment**, under the credit lock of the WHMCS client (`GET_LOCK`, shared with `renew`):
+      re-read the credit and the invoice balance, and apply the **full** balance or nothing.
+      WHMCS 9 books applied credit as a credit note plus a payment in `tblaccounts`, so
+      `invoiceBalance()` sees it. Not enough → **rollback**: `CancelOrder` + `DeleteOrder`, then
+      verify the order is gone or cancelled, the invoice cancelled with no gateway payment, and
+      the credit equal to its value under the lock → `rolled_back` (the key is free again) and
+      `402`; anything else → `needs_reconciliation` and `409`. Applied but not Paid, or a
+      negative balance → `needs_reconciliation`.
+   3. **Provisioning** → `provisioned` when the service is Active or Suspended with its delivery
+      footprint: `accessTokenId` (normal delivery) or the `bulkDelivery` mark (CSV — a product
+      configured for CSV delivers a batch even at quantity 1). **There is exactly one attempt.**
+      A product set to provision *on payment* was provisioned by WHMCS itself while
+      the invoice was paid in step 2; the Hub then only accepts the order (`AcceptOrder`,
+      `autosetup` off) and never runs the module again. Only a product provisioned on *accept*
+      gets its attempt from `AcceptOrder` (`autosetup` on). No footprint → `needs_reconciliation`
+      and `409 not_provisioned`, with WHMCS's own error from its Module Queue in `last_error`:
+      **the order is kept** — it is paid — and a person finishes it (below). A Hub product must
+      never provision *on order*: WHMCS would create the token before any payment.
+   4. Read the delivery → `delivered`. A failed read leaves it `provisioned` and answers
+      `409 not_delivered`; reading has no side effect, so a repeat or `getAccessCode` retries it.
+6. Response: `{ replayed, keys: [{ upstreamOrderId, customerReference, deliveryType, accessTokenId + accessCode | csv }] }`.
+
+Why keys: a gateway timeout, or two concurrent Creates of one service, could buy a second key.
+The connector learns `upstreamOrderId` only from the `order` response, so a lost response — a
+`504` from the web gateway while the Hub still places and provisions the order — leaves its
+service Pending, and Create again places a new order. A reference cannot fix this — service ids
+repeat across installs, reinstalls and restored backups — a key saved per purchase can.
+
+**Resume** (`PurchaseProcessor::resume`): the saved state proves only what finished; the next
+step may have run before the request died. Its footprint decides, and only a provably absent
+step is redone. From `created`: the marker on a service → adopt its order; no marker and no
+order of the client since that no purchase accounts for → order now; otherwise a person.
+From `ordered`: invoice Paid → `paid`, and provisioning goes on exactly as in step 3 (for a
+product provisioned on payment, WHMCS's run during that payment was the attempt; `AcceptOrder`
+never ran — the state after payment is saved first); Unpaid with nothing applied → pay;
+anything else → a person. From `paid`:
+a recorded token (or batch) on a live service → `provisioned`; otherwise a person —
+**provisioning is never redone automatically**, because the token request can outlive the
+request that sent it (the Hub's access-server client has no timeout) and a second
+`AcceptOrder` could mint a second token.
+
+**`linkOrder`** binds a keyless order the admin names to a key, under the key lock: the key
+must be free (or already bound to that very order — the lost-response case, answered again),
+the order this partner's, keyless, `delivered`, with the same product, cycle and reference, its
+service Active or Suspended; then `UPDATE … SET idempotency_key WHERE … idempotency_key IS NULL`
+must match exactly one row (`409 already_claimed` otherwise), and the order's delivery is
+returned. It never buys; a Hub without the action answers `404`.
+
+**Purchases needing attention** (the partner's page in the addon): `needs_reconciliation` rows,
+and rows left in a step for more than ten minutes (a keyless request that died). **Retry**
+re-checks the footprints and, when the service is provisioned and the invoice paid, reads the
+key and marks it delivered, accepting a still-Pending order with `autosetup` off; **Release**
+closes an unfinished purchase as `rolled_back` once no order or payment of it remains (or the
+admin confirms the refund). Neither orders, pays or provisions.
+
+**Paid but not provisioned — the support procedure** (also on that page). Create may run again
+only after a confirmed failure *before* token creation, or confirmation that the creation
+ended without a token. Elapsed time, an empty token list or "an error was logged" prove
+nothing on their own: the module can create the token and then fail reading its code or
+saving its id. Establish, for this purchase's creation request (customer id + order id, never
+a service id):
+
+1. **The access server's tokens** for this customer and order
+   (`GET /api/projects/{projectId}/access-tokens?customerId=…&orderId=…&shopId=WHMCS`, or
+   VpnHood! MANAGER): a token there is the outcome.
+2. **Nothing listed?** That is final only once no creation request is still running. The access
+   server's request log settles it: each `POST …/projects/{projectId}/access-tokens` since the
+   order was placed needs its `Request finished` line (or the service restarted since, which
+   ended it).
+3. **Why it failed** — context, not proof: WHMCS's Activity Log (`Module Create Failed - Service
+   ID: …`) and Utilities → Module Queue record the module's error even with module debug
+   logging off; the Module Log has the call's details when it is on. The purchase's
+   `last_error` repeats the queue's error. The Module Queue's **Retry** is a Create — never use
+   it before this procedure.
+
+A token exists → store its id on the service (`accessTokenId`; `bulkDelivery` = `yes` for a
+batch) and set the service Active — never press Create then. Confirmed none and every request
+finished → press Create on the service. Then Retry. Unresolved → it stays in the list.
 
 **`upstreamOrderId` is the connector-facing handle** for every subsequent action (`renew`,
 `suspend`, `unsuspend`, `terminate`, `getOrder`, `getAccessCode`). It is the WHMCS **order id**;
@@ -187,7 +296,7 @@ tab downstream), and named in the `404` when the other id arrives.
 
 ### Error statuses: never 5xx for a rejection the partner can act on
 
-`PartnerApiController::localApi()` wraps every `localAPI` call and turns a non-`success`
+`LocalApi::call()` wraps every `localAPI` call and turns a non-`success`
 result into an `ApiException` with **422**, message `Upstream WHMCS rejected <Action>: <its
 message>`. It must not be a 5xx, and that is not a style preference:
 
@@ -244,19 +353,20 @@ invoice and its email exactly as standard; it simply stays **Unpaid** until the 
 > (Configuration → System Settings → General Settings → Credit). This is the mechanism: with
 > it off, no invoice is ever paid from credit on its own, so renewal invoices naturally stay
 > Unpaid. The Hub instead applies credit **explicitly**, only where it means to
-> (`PartnerApiController::settleFromCredit`). If someone turns this setting back on, partner
-> services silently revert to auto-renewing.
+> (`PurchaseProcessor::payLocked` and `::settleInvoice`). If someone turns this setting back
+> on, partner services silently revert to auto-renewing.
 
-- **Order:** `placeSingleOrder` calls `settleFromCredit()` on the order invoice, then
-  `assertInvoicePaid` before provisioning — so ordering still fails closed on insufficient
-  credit (`402` + rollback).
+- **Order:** the payment step applies the order invoice's full balance from credit, or nothing,
+  before provisioning — so ordering still fails closed on insufficient credit (`402` + rollback).
 - **Renewal:** the cron-generated renewal invoice is left completely alone and stays Unpaid.
   `nextduedate` does not advance while it is unpaid, and the token expiry tracks `nextduedate`,
   so **access stops on the real term end** until the partner renews.
 - **Renew:** `PartnerApiController::renew` pays the outstanding invoice from native credit
-  (`402` if short, `409` if nothing outstanding). Paying a Hosting renewal invoice drives
-  WHMCS's normal renewal — `nextduedate` advances one cycle and `vpnhoodstore_Renew` re-syncs
-  the token; the call then re-asserts the token expiry idempotently.
+  (`402` if short, `409` if nothing outstanding) under the same credit lock as orders, so a
+  renewal and an order competing for the last credit cannot both spend it. Paying a Hosting
+  renewal invoice drives WHMCS's normal renewal — `nextduedate` advances one cycle and
+  `vpnhoodstore_Renew` re-syncs the token; the call then re-asserts the token expiry
+  idempotently.
 - **Scope:** `isPartnerProductService` — the service's product is in
   `mod_vpnhood_partner_products`. Partner products are distinct from retail products, so retail
   is never affected and no per-service marker is needed. Non-Hub services (one-time products,
@@ -266,9 +376,11 @@ invoice and its email exactly as standard; it simply stays **Unpaid** until the 
   but auto-**termination** would destroy the service before the partner can renew — control
   this in WHMCS *Automation Settings* (termination window), not in module code.
 
-> **Unverified against a live WHMCS.** Confirm that `applyCredit()` consumes
-> `tblclients.credit` and that paying the renewal invoice triggers the native renewal
-> (`nextduedate` advance + `vpnhoodstore_Renew`).
+> Verified on WHMCS 9.0.7 (`renew.test.sh`, `purchase-recovery.test.sh`): `applyCredit()`
+> consumes `tblclients.credit`, recorded as a credit note plus a `tblaccounts` payment, and
+> paying the renewal invoice triggers the native renewal (`nextduedate` advance +
+> `vpnhoodstore_Renew`). Cancelling an order returns credit applied to an **unpaid** invoice,
+> but not to a **paid** one — which is why a paid order is never rolled back.
 
 ## Extending
 
@@ -276,11 +388,17 @@ invoice and its email exactly as standard; it simply stays **Unpaid** until the 
   method, document it in the addon `README.md` table and in the connector's API contract doc.
 - **New partner attribute:** add a column in `_activate` (and handle upgrades — see below),
   surface it in `_output`, read it in `PartnerRepository`/`Auth`.
-- **Schema upgrades:** `_activate` only creates tables when missing. For changes to an
-  already-installed table, guard with `Schema::hasColumn(...)` and `ALTER` — do not assume a
-  fresh install. Keep `_deactivate` in sync.
+- **Schema upgrades:** `_activate` only creates tables when missing, and there is no upgrade
+  step, so an installed Hub never re-runs it. A new table is created where it is first needed,
+  under a lock, with a completion marker (see `PurchaseRepository::ensureReady()`); for changes
+  to an already-installed table, guard with `Schema::hasColumn(...)` and `ALTER` — do not
+  assume a fresh install. Name indexes explicitly (MariaDB allows 64 characters). Keep
+  `_deactivate` in sync.
+- **New API behaviour a connector depends on:** advertise it in
+  `PartnerApiController::FEATURES` (the `X-Vpnhood-Hub-Features` header), so a connector can
+  tell a Hub that has it from one that does not.
 - **Never trust client-supplied ids:** every action scopes to `partner.client_id`
-  (`ownedService()` enforces ownership). Preserve this when adding actions.
+  (`ownedServiceByOrder()` enforces ownership). Preserve this when adding actions.
 - **Reuse provisioning:** call `ApiService`/`Helper`; never hand-roll access-server requests.
 
 ## Versioning & releases
@@ -356,10 +474,17 @@ It **only reports** — installing an update stays a deliberate human act.
 
 ## Testing / verification
 
-There are no automated tests. Verify against a live WHMCS:
-1. Activate `vpnhoodpartnerhub`; confirm the three tables exist.
+The integration suites in `tests/integration/` run against the dev WHMCS (see its README):
+`hub-api.test.sh` (the API over HTTP, keyed and keyless ordering, reconcile, `linkOrder`),
+`purchase-recovery.test.sh` (every failure path of a purchase and its recovery),
+`connector-idempotency.test.sh` (the connector's side, and both directions of compatibility
+with the previous releases), plus the buyer lifecycle scripts. By hand, against a live WHMCS:
+
+1. Activate `vpnhoodpartnerhub`; confirm the four tables exist.
 2. Create a partner linked to a WHMCS client, add credit, map a product.
 3. `curl` the API: `getBalance`, then `order` — confirm an order+invoice were created,
    invoice paid from credit, credit decreased, `vpnhoodstore` provisioned a token, and a
    valid access code returned. Insufficient credit must roll back and return `402`.
+   Repeat the `order` with the same `idempotencyKey`: same `upstreamOrderId`,
+   `replayed: true`, credit unchanged.
 4. Exercise `renew`/`suspend`/`unsuspend`/`terminate` and confirm effects + module log.
