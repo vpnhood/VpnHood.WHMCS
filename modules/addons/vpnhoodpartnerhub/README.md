@@ -22,7 +22,9 @@ provisioning (the existing `vpnhoodstore` / `Helper` / `ApiService` do that).
 1. Copy `modules/addons/vpnhoodpartnerhub/` into your WHMCS `/modules/addons/`.
 2. **System Settings → Addon Modules → VpnHood! Partner Hub → Activate**. Activation
    creates the tables `mod_vpnhood_partners`, `mod_vpnhood_partner_products`,
-   `mod_vpnhood_partner_log`. **Deactivating preserves partner data** (partners keep their
+   `mod_vpnhood_partner_log` and `mod_vpnhood_partner_purchases` (an installed Hub that
+   predates the last one creates it on its first order, and records the orders it placed
+   before from the request log). **Deactivating preserves partner data** (partners keep their
    API credentials across a deactivate/reactivate); to remove the module's data
    permanently, drop those tables manually.
 
@@ -54,7 +56,8 @@ provisioning (the existing `vpnhoodstore` / `Helper` / `ApiService` do that).
 1. Open the addon (**Addons → VpnHood! Partner Hub**) and **Add Partner**:
    - **WHMCS Client ID** — the client account whose **credit balance** funds the
      partner's orders. Create/choose a client first, then add credit to it
-     (Clients → Add Credit). WHMCS automatic credit application must remain enabled.
+     (Clients → Add Credit). WHMCS **Automatic Credit Use must stay OFF** — the Hub applies
+     credit itself (see *Renewals are manual*).
    - **Status** — Active/Suspended.
    - **IP Allowlist** — optional, comma-separated.
 2. On save you are shown the **API Key** and **API Secret** (the secret is shown once).
@@ -84,13 +87,17 @@ Content-Type:     application/json
 ```
 
 Body: `{ "action": "<action>", ...params }`. Response:
-`{ "success": true, "data": {...} }` or `{ "success": false, "error": "..." }`.
+`{ "success": true, "data": {...} }` or `{ "success": false, "error": "...", "code"?: "...", "details"?: {...} }`.
+`code` names the failures a caller handles differently (below); `details` carries their data.
+Every response also carries `X-Vpnhood-Hub-Features: idempotency-v1` — what this Hub
+supports; a Hub that predates it sends nothing.
 
 | Action | Params | Returns |
 |--------|--------|---------|
 | `getBalance` | — | `{ clientId, balance, currency }` |
 | `getProducts` | — | `{ products: [{ downstreamRef, name, paymentType, allowMultipleQuantities, billingCycleMonths, availableCycles }] }` |
-| `order` | `downstreamRef`, `billingCycle?`, `quantity?`, `customerReference?` | `{ keys: [{ upstreamOrderId, customerReference, deliveryType, accessTokenId + accessCode \| csv }] }` |
+| `order` | `downstreamRef`, `billingCycle?`, `quantity?`, `customerReference?`, `idempotencyKey?`, `confirmNewPurchase?` | `{ replayed, keys: [{ upstreamOrderId, customerReference, deliveryType, accessTokenId + accessCode \| csv }] }` |
+| `linkOrder` | `idempotencyKey`, `upstreamOrderId`, `downstreamRef`, `billingCycle?`, `customerReference?` | as `order`, plus `linked: true` |
 
 > `downstreamRef` is the WHMCS product id (as a string). Partners should call `getProducts`
 > to discover the available refs rather than hard-coding them. `paymentType` is the product's
@@ -113,8 +120,34 @@ Body: `{ "action": "<action>", ...params }`. Response:
 | `unsuspend` | `upstreamOrderId` | `{ status }` |
 | `terminate` / `cancel` | `upstreamOrderId` | `{ status }` |
 | `getOrder` | `upstreamOrderId` | `{ status, nextDueDate }` |
-| `getAccessCode` | `upstreamOrderId` | `{ accessTokenId, accessCode }` |
+| `getAccessCode` | `upstreamOrderId` | `{ deliveryType, accessTokenId, accessCode }`, or `{ deliveryType: "csv", csv }` for a CSV (batch) order |
 | `getTransactions` | — | `{ transactions: [...] }` (native credit history) |
+
+### Safe retries: `idempotencyKey`
+
+An `order` whose response is lost — a timeout, or a gateway `504` while the order still
+completes — can be repeated safely **with an `idempotencyKey`** (1-64 characters: letters,
+digits, `.`, `-`, `_`; case-sensitive). The key buys exactly one unit, once: repeats with the
+same key return that order — same `upstreamOrderId`, current code, `replayed: true` — and
+charge nothing; two calls at once are serialized, the second waits up to 20 s for the first
+(then `409 in_progress` — retry). Use one key per unit (`quantity` must be 1) and a new key
+for every new purchase. **Without a key, every call buys**, as it always has.
+
+| `code` | HTTP | Meaning |
+|--------|------|---------|
+| `in_progress` / `initializing` | 409 | still running (a call with the same key, or the Hub's first-use setup) — retry |
+| `key_mismatch` | 409 | the key belongs to a different request (product, billing cycle or `customerReference`) |
+| `key_spent` | 409 | the key's order is terminated or cancelled; a replacement needs a new key |
+| `reconcile` | 409 | orders placed **without** a key are live under this `customerReference` (`details.candidates`: `upstreamOrderId, product, billingCycle, status, placedAt`). If one of them is this purchase — its response was lost before you used keys — bind it with `linkOrder`; otherwise repeat the order with `confirmNewPurchase: true` |
+| `insufficient_credit` | 402 | nothing was charged; top up and repeat |
+| `not_provisioned` / `needs_reconciliation` | 409 | paid, but it could not finish; VpnHood support finishes it (`details.upstreamOrderId`). **Do not order again** — a keyed repeat is refused until then |
+| `not_delivered` | 409 | provisioned, but the key could not be read: repeat, or `getAccessCode` |
+| `link_rejected` / `already_claimed` | 404 / 409 | `linkOrder`: not this purchase (different product, cycle or reference, not live, never finished), or another key has it |
+
+`linkOrder` never buys: a Hub without it answers `404 Unknown action`. It binds the order you
+name — only a live, finished, keyless order of yours placed with the same product, billing
+cycle and `customerReference` — to the key, so the key's repeats return it; repeating the
+link returns it again.
 
 > **`upstreamOrderId` identifies an order everywhere.** It is the upstream WHMCS **order id**
 > returned by `order`; the Hub resolves it to the underlying service itself, scoped to the
@@ -139,7 +172,7 @@ Body: `{ "action": "<action>", ...params }`. Response:
 curl -X POST https://store.example.com/modules/addons/vpnhoodpartnerhub/api.php \
   -H "X-Vpnhood-Key: $KEY" -H "X-Vpnhood-Secret: $SECRET" \
   -H "Content-Type: application/json" \
-  -d '{"action":"order","downstreamRef":"42","customerReference":"ABC123"}'
+  -d '{"action":"order","downstreamRef":"42","customerReference":"ABC123","idempotencyKey":"3f9c0b7e2d4a41c8"}'
 ```
 
 ## Renewals are manual
@@ -167,12 +200,53 @@ pays it — the partner's credit is never consumed. Nothing renews until the con
 
 ## Safety model
 
-- **Credit is the hard limit.** The order endpoint checks that the generated invoice was
-  settled from credit before provisioning; if not, the order is rolled back (`CancelOrder`
-  then `DeleteOrder`) and a `402` is returned — nothing is provisioned on insufficient credit.
+- **Credit is the hard limit, applied in full or not at all.** The invoice of an order (and
+  of a `renew`) is paid from credit only when the credit covers it, under a lock per WHMCS
+  client that every Hub payment takes. Otherwise nothing is applied, the order is rolled back
+  (`CancelOrder` then `DeleteOrder`) and a `402` is returned — nothing is provisioned on
+  insufficient credit. Credit operations outside the Hub are not serialized by that lock; the
+  check after applying catches a collision with one.
+- **A paid order is never deleted.** A failure after payment leaves the order and its
+  purchase record in place and answers `409`; a rollback that cannot be verified (the order
+  or invoice left behind, the credit balance changed) is never taken as done. Either goes to
+  **Purchases needing attention** on the partner's page (below).
+- **No double charge on a repeat** with an `idempotencyKey` (above), including after a request
+  that died midway: each step's footprint (the order WHMCS created, the invoice, the token
+  recorded on the service) decides whether it happened; only a step that provably did not
+  happen is redone, and provisioning never is.
 - **Scoped authorization.** Every action is scoped to the partner's own `client_id`; a
   partner can only order mapped products and only act on their own services.
 - **Secret at rest.** The API secret is stored hashed (`password_hash`) and verified with
   `password_verify`; transport is expected over HTTPS.
 - **Audit.** Every call is logged to `mod_vpnhood_partner_log` and errors to the WHMCS
   module log (`vpnhoodpartnerhub`).
+
+## Purchases needing attention
+
+The partner's page (**Addons → VpnHood! Partner Hub → Manage**) lists every purchase that
+needs a person: `needs_reconciliation`, and requests that stopped midway more than ten
+minutes ago. The partner list shows a banner while any exist. Each row links its order,
+invoice and service, says what went wrong, and offers:
+
+- **Retry** — re-checks the footprints and, when the service is provisioned and the invoice
+  paid, reads the key and marks the purchase delivered (a keyed repeat from the partner then
+  returns it). It accepts a still-Pending order without running the module. It never orders,
+  pays or provisions.
+- **Release** — closes an unfinished purchase as rolled back, which frees its key. Refused
+  while an order or payment it made still exists, unless **Refund done** is ticked.
+
+**Paid but not provisioned** is fixed on the service itself, and the page spells out the
+procedure: establish what the original token creation did before anything creates a token
+again — the tokens the access server lists for this customer and order, and, when it lists
+none, its request log showing that every creation request since the order finished. WHMCS's
+Activity Log and Module Queue say why it failed (never use the Module Queue's Retry — it is a
+Create). An existing token is recorded on the service (never press Create then); only a
+confirmed "no token, nothing pending" allows Create. Then **Retry**.
+
+The Hub makes exactly one provisioning attempt per order: a product set to provision **on
+payment** is provisioned by WHMCS while its invoice is paid, and the Hub never runs the module
+again; a product provisioned **on accept** gets its attempt from `AcceptOrder`. Never set a
+Hub product to provision **on order** — WHMCS would create the token before it is paid.
+
+The client area of a partner's service shows "VpnHood order #N — your reference R", and the
+admin service tab adds the reference, the key and the purchase state.

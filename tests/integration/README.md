@@ -72,6 +72,54 @@ Independent of the lifecycle scripts and safe to run anytime: it places no order
 spends **no credit** and provisions **no access token**. It removes both the product it
 creates and the temporary mapping whether or not the assertions pass.
 
+## purchase-recovery.test.sh — purchases when things go wrong
+
+**`purchase-recovery.test.sh [scenario ...]`** — runs the scenarios of
+`purchase-recovery.test.php` on the dev box, each a failure set up the way it happens in
+production and ending in the recovery the design promises (one order, charged once, one
+token). Orders go through the real Hub API over HTTPS as the test partner (`.env`).
+
+| Scenario | What it proves |
+| --- | --- |
+| `insufficient-credit` | too little credit: `402`, nothing applied, rollback verified, key released; topped up, the same key buys once |
+| `failure-after-payment` | an access server that rejects the token request (a non-existent server farm, restored in a `finally`): the paid order is kept (`409 not_provisioned`), a keyed repeat is refused; the support procedure's evidence (module log: the token `POST` itself rejected; no token listed), Create on the service, Retry; the repeat returns the original order |
+| `keyless-failure-after-payment` | the same without a key: an unfinished order cannot be linked yet; after the fix, `getAccessCode` returns its key |
+| `failed-rollback` | credit moving during a rollback (a dev-only hook, `hooks/vhtest-rollback-interference.php`, installed and removed around it): `needs_reconciliation`, the key kept, Release frees it |
+| `crash-resume` | the purchase row set back to `created`, `ordered`, `paid` (a request that died before saving): each repeat returns the same order, no charge, no second token; a row that died before `AddOrder` orders |
+| `token-record-lost` | token created, its id lost: the repeat is refused, the listed token is adopted, Retry finishes it — Create never pressed |
+| `csv` | a CSV product (mapped for the run): batch delivery, replay, completion by the batch mark, `getAccessCode` by type (keyed and keyless); the batches are expired and disabled afterwards |
+| `views` | the client area's "VpnHood order #N — your reference R" and the admin tab's purchase record |
+| `link-race` | two keys linking one keyless order at once: exactly one wins |
+| `shared-credit` | a renewal and an order at once with credit for one: one succeeds, one `402`, never negative (runs WHMCS's Generate Invoices) |
+| `init` | first-use initialization held elsewhere: a keyed order waits, then `409 initializing`, never buys; an interrupted back-fill is resumed |
+
+⚠ Spends reseller (test) credit and provisions real tokens; everything it orders is
+terminated (or, for CSV batches, expired and disabled).
+
+## connector-idempotency.test.sh — the connector's side, and compatibility
+
+**`connector-idempotency.test.sh [phase ...]`** — drives the connector the way a partner's
+WHMCS does (`ModuleCreate`/`ModuleTerminate` on the buyer's service), deploying older
+releases from their git tags where a phase needs them and the working tree of both repos
+again on exit:
+
+- `current` — a lost response recovered by Create again (same order, no charge), two
+  concurrent Creates of one service (one order), Terminate then Create (a new key and
+  order; the old key `409 key_spent`).
+- `old-connector` — the connector release partners run today (`OLD_CONNECTOR`, default
+  `v1.2.2`) against this Hub: a repeated Create buys again, as it always did, and the whole
+  buyer lifecycle passes (`purchase-order`, `suspend`, `unsuspend`, `terminate`, `renew`).
+- `legacy` — orders placed by the old connector, their responses "lost", then this
+  connector: Create stops with `reconcile` (and learns `idempotency-v1` from that `409` with
+  an empty cache), the Module tab offers Link, a wrong link is refused, Link returns the
+  original order, "Order a new key" buys once.
+- `old-hub` — this connector against the previous Hub (`OLD_HUB`, default `v1.2.8`): the
+  cached `idempotency-v1` is dropped, the admin is told not to press Create again, no Link is
+  offered, a repeat there buys again; back on this Hub, the feature is learned again.
+
+⚠ Spends buyer and reseller (test) credit; `old-connector` runs `purchase-order.test.sh`,
+which wipes the buyer's and reseller's earlier orders.
+
 ## hub-api.test.sh — Hub API black-box test
 
 A black-box smoke test for the `vpnhoodpartnerhub` API. It drives the live HTTP
@@ -104,18 +152,28 @@ cp .env.example .env          # then edit .env with your URL + partner key/secre
 `.env` is gitignored. Credentials are read from the environment — nothing is
 hard-coded in the script or committed.
 
-- **Read-only by default** — auth failures, `getBalance`, `getProducts`, and the
-  "unknown product → 403" check. Safe to run anytime; spends nothing.
-- **Provisioning run** — set `HUB_RUN_PROVISION=1` to exercise
-  `order` → `getOrder` → `getAccessCode`. ⚠️ This **spends partner credit** and
-  **provisions a real key** on the access server. The order is left **Active**
-  afterward — nothing else runs automatically.
+- **Read-only by default** — auth failures, the `X-Vpnhood-Hub-Features` header on success
+  and error responses, `getBalance`, `getProducts`, the "unknown product → 403" check, and
+  request validation (a malformed or multi-unit `idempotencyKey`, `linkOrder` without a key).
+  Safe to run anytime; spends nothing.
+- **Provisioning run** — set `HUB_RUN_PROVISION=1`. ⚠️ This **spends partner credit** and
+  **provisions real keys** on the access server:
+  - a **keyed** order placed as two concurrent identical calls, then repeated: one order,
+    charged once, the others `replayed`; the same key with another reference `409
+    key_mismatch`; `getOrder` and `getAccessCode`. This order is left **Active** unless
+    `HUB_RUN_TERMINATE=1`.
+  - **keyless** orders: a repeat buys a second order; a keyed order under their reference
+    `409 reconcile` listing both; `linkOrder` binds one (and answers again when repeated),
+    refuses another order for the same key and another key for the same order; the linked key
+    replays it; `confirmNewPurchase` buys; after they are terminated, the key is `key_spent`.
+    These orders are always terminated at the end.
 - **Lifecycle jobs** — renewal, suspension, and termination are separate,
   opt-in jobs layered on top of a provisioning run; none of them run unless
   you ask for them explicitly:
-  - `HUB_RUN_SUSPEND=1` — `suspend` → `unsuspend`
+  - `HUB_RUN_SUSPEND=1` — `suspend` → (a suspended keyed order still replays) → `unsuspend`
   - `HUB_RUN_RENEW=1` — `renew` (expects 409 if no renewal invoice is due yet)
-  - `HUB_RUN_TERMINATE=1` — `terminate`
+  - `HUB_RUN_TERMINATE=1` — `terminate`; then the key is `key_spent`, and a new key buys a
+    replacement, terminated too
 
 Exit code is non-zero if any assertion fails, so it is CI-friendly.
 

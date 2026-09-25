@@ -92,10 +92,13 @@ class PartnerRepository
         ]);
     }
 
-    /** Delete a partner and all of its product mappings and logs. */
+    /** Delete a partner and all of its product mappings, purchase records and logs. */
     public function deletePartner(int $id): void
     {
         Capsule::table('mod_vpnhood_partner_products')->where('partner_id', $id)->delete();
+        if (Capsule::schema()->hasTable(PurchaseRepository::TABLE)) {
+            Capsule::table(PurchaseRepository::TABLE)->where('partner_id', $id)->delete();
+        }
         Capsule::table('mod_vpnhood_partner_log')->where('partner_id', $id)->delete();
         Capsule::table('mod_vpnhood_partners')->where('id', $id)->delete();
     }

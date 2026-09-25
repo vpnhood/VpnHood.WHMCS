@@ -20,7 +20,8 @@
    customers, so the one their API takes is named here. Empty for every other client. *}
 {if $partnerOrderId}
     <p class="text-muted">
-        <strong>VpnHood order #{$partnerOrderId|escape}</strong> — quote this in support, and
+        <strong>VpnHood order #{$partnerOrderId|escape}</strong>{if $partnerReference} — your reference
+        <strong>{$partnerReference|escape}</strong>{/if}. Quote the order number in support, and
         send it as <code>upstreamOrderId</code> in the Partner API. The id in this page's
         address is the service id and is not accepted there.
     </p>

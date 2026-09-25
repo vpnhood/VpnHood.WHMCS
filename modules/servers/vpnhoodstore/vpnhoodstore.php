@@ -232,10 +232,14 @@ function vpnhoodstore_ClientArea(array $params): array {
         }
     }
 
+    $partnerOrderId = vpnhoodstore_partnerOrderId($params);
     return array(
         'templatefile' => $isCsvTokenDelivery ? 'clientarea-reseller.tpl' : 'clientarea.tpl',
         'templateVariables' => vpnhoodstore_storeBadgeVars($params)
-            + array('partnerOrderId' => vpnhoodstore_partnerOrderId($params)),
+            + array(
+                'partnerOrderId'   => $partnerOrderId,
+                'partnerReference' => (string) (vpnhoodstore_partnerPurchase($partnerOrderId)['customer_reference'] ?? ''),
+            ),
     );
 }
 
@@ -306,11 +310,31 @@ function vpnhoodstore_partnerOrderId(array $params): string {
 }
 
 /**
+ * The Partner Hub's purchase record behind a partner order: the partner's own reference
+ * for it (their service id, when their connector placed it), its idempotency key and how
+ * far it got. Null for everyone else, and on installs without the Hub addon or before its
+ * purchase records exist — this module ships standalone.
+ */
+function vpnhoodstore_partnerPurchase(string $orderId): ?array {
+    if ($orderId === '')
+        return null;
+    try {
+        if (!Capsule::schema()->hasTable('mod_vpnhood_partner_purchases'))
+            return null;
+        $row = Capsule::table('mod_vpnhood_partner_purchases')->where('order_id', (int)$orderId)->first();
+        return $row ? (array)$row : null;
+    }
+    catch (Throwable $e) {
+        return null;
+    }
+}
+
+/**
  * Admin service page: show which store sold this service, so an admin reading the
  * order sees what the customer sees without opening the IAP addon, plus — for partner
  * clients — the order id their API calls must carry, so support can answer "which id?"
- * from the page it is being asked about. Read-only — the purchase and order records own
- * these values, neither is editable here.
+ * from the page it is being asked about, and the Hub's purchase record behind it.
+ * Read-only — the purchase and order records own these values, neither is editable here.
  */
 function vpnhoodstore_AdminServicesTabFields(array $params): array {
     $fields = array();
@@ -325,6 +349,19 @@ function vpnhoodstore_AdminServicesTabFields(array $params): array {
     if ($partnerOrderId !== '') {
         $fields['Partner API order id'] = '#' . htmlspecialchars($partnerOrderId, ENT_QUOTES, 'UTF-8')
             . ' <em>(the <code>upstreamOrderId</code> this partner must send — not the service id in the page address)</em>';
+    }
+
+    $purchase = vpnhoodstore_partnerPurchase($partnerOrderId);
+    if ($purchase !== null) {
+        $esc = fn ($v) => htmlspecialchars((string)$v, ENT_QUOTES, 'UTF-8');
+        $fields['Partner reference'] = $purchase['customer_reference'] !== null && $purchase['customer_reference'] !== ''
+            ? $esc($purchase['customer_reference']) . ' <em>(the partner\'s own id for this key — their service id when their connector ordered it)</em>'
+            : '<em>none sent</em>';
+        $fields['Partner purchase'] = '#' . (int)$purchase['id'] . ' — ' . $esc(str_replace('_', ' ', $purchase['state']))
+            . ($purchase['idempotency_key'] !== null
+                ? ', key <code>' . $esc($purchase['idempotency_key']) . '</code>'
+                : ', no key (a repeat of its order buys again)')
+            . ($purchase['last_error'] ? '<br><em>' . $esc($purchase['last_error']) . '</em>' : '');
     }
 
     return $fields;
