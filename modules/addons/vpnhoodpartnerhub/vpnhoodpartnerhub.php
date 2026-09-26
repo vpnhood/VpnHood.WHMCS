@@ -61,6 +61,13 @@ function vpnhoodpartnerhub_config(): array
                 'Description'  => 'System name of an active payment gateway to tag partner order invoices with (e.g. banktransfer). Invoices are still settled from the partner\'s credit balance; this only labels them. Leave blank to use the WHMCS default.',
                 'Default'      => '',
             ],
+            'PartnerRefundDays' => [
+                'FriendlyName' => 'Partner Refund Window (days)',
+                'Type'         => 'text',
+                'Size'         => '4',
+                'Description'  => 'Days after payment in which a partner can refund a newly bought key through the API: the key ends and its price returns to the partner\'s credit. Renewals are never refundable this way. 0 turns partner refunds off.',
+                'Default'      => '3',
+            ],
         ],
     ];
 }

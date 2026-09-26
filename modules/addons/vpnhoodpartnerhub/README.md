@@ -40,7 +40,9 @@ provisioning (the existing `vpnhoodstore` / `Helper` / `ApiService` do that).
    of the gateways this install actually has, listed as *Display Name (system name)*; the
    stored value is always the system name (e.g. `banktransfer`), which is what WHMCS's
    `AddOrder` requires. The gateway only labels the partner order invoices — they are still
-   settled from the partner's credit balance — but WHMCS needs a valid one.
+   settled from the partner's credit balance — but WHMCS needs a valid one. Set the
+   **Partner Refund Window (days)**: how long after payment a partner can refund a new key
+   through the API (default 3; `0` turns partner refunds off; see *Refunds*).
 
    The field reports the state of the current value in its own description on the
    configuration screen, including immediately after **Save Changes**: green when the value
@@ -119,6 +121,7 @@ supports; a Hub that predates it sends nothing.
 | `suspend` | `upstreamOrderId`, `suspendReason?` | `{ status }` |
 | `unsuspend` | `upstreamOrderId` | `{ status }` |
 | `terminate` / `cancel` | `upstreamOrderId` | `{ status }` |
+| `refund` | `upstreamOrderId` | `{ status: "refunded", amount }` — see *Refunds* |
 | `getOrder` | `upstreamOrderId` | `{ status, nextDueDate }` |
 | `getAccessCode` | `upstreamOrderId` | `{ deliveryType, accessTokenId, accessCode }`, or `{ deliveryType: "csv", csv }` for a CSV (batch) order |
 | `getTransactions` | — | `{ transactions: [...] }` (native credit history) |
@@ -135,7 +138,7 @@ for every new purchase. **Without a key, every call buys**, as it always has.
 
 | `code` | HTTP | Meaning |
 |--------|------|---------|
-| `in_progress` / `initializing` | 409 | still running (a call with the same key, or the Hub's first-use setup) — retry |
+| `in_progress` / `initializing` | 409 | still running (a call with the same key, another action on the same account, or the Hub's first-use setup) — retry |
 | `key_mismatch` | 409 | the key belongs to a different request (product, billing cycle or `customerReference`) |
 | `key_spent` | 409 | the key's order is terminated or cancelled; a replacement needs a new key |
 | `reconcile` | 409 | orders placed **without** a key are live under this `customerReference` (`details.candidates`: `upstreamOrderId, product, billingCycle, status, placedAt`). If one of them is this purchase — its response was lost before you used keys — bind it with `linkOrder`; otherwise repeat the order with `confirmNewPurchase: true` |
@@ -143,6 +146,10 @@ for every new purchase. **Without a key, every call buys**, as it always has.
 | `not_provisioned` / `needs_reconciliation` | 409 | paid, but it could not finish; VpnHood support finishes it (`details.upstreamOrderId`). **Do not order again** — a keyed repeat is refused until then |
 | `not_delivered` | 409 | provisioned, but the key could not be read: repeat, or `getAccessCode` |
 | `link_rejected` / `already_claimed` | 404 / 409 | `linkOrder`: not this purchase (different product, cycle or reference, not live, never finished), or another key has it |
+| `service_ended` | 409 | `suspend`, `unsuspend` or `renew` of an order whose service has ended (Terminated, Cancelled or Fraud; `details.status`): termination is final — buy a new key |
+| `refund_window_closed` | 409 | `refund` after the refund window, or with partner refunds turned off; nothing changed (`terminate` still ends the key, without returning credit) |
+| `not_refundable` | 409 | `refund` of an order the API does not refund (see *Refunds*); nothing changed — VpnHood refunds it by hand if it should be |
+| `refund_incomplete` | 409 | `refund` ended the key but could not return the credit; VpnHood support finishes it (quote the invoice) |
 
 `linkOrder` never buys: a Hub without it answers `404 Unknown action`. It binds the order you
 name — only a live, finished, keyless order of yours placed with the same product, billing
@@ -198,6 +205,40 @@ pays it — the partner's credit is never consumed. Nothing renews until the con
 - `renew` no longer accepts a `nextDueDate` override — WHMCS computes the new term when the
   invoice is paid.
 
+## Refunds
+
+`refund` undoes a sale inside the refund window: the key ends and the invoice total returns to
+the partner's credit balance. `terminate` ends a key and returns nothing; `refund` is the only
+way credit comes back through the API.
+
+- **Window.** *Partner Refund Window (days)* from the moment the invoice was paid: 3 by default,
+  `0` turns partner refunds off. After it: `409 refund_window_closed`, nothing changes.
+- **Only a new key's first purchase.** The refundable invoice is the one the Hub paid from the
+  partner's credit when it placed the order (its purchase record). A renewal is never refunded
+  through the API, and neither is the purchase once anything else is invoiced for the service
+  (a renewal invoice, paid or not): ending the key would take that term too, and WHMCS puts
+  same-day renewals of several services on one invoice that `renew` pays whole.
+- **Refused, and left to VpnHood to refund by hand** (`409 not_refundable`, nothing changes): an
+  order the Hub did not sell to this partner (created or paid by hand, or moved from another
+  client), a purchase that never finished, an invoice that is unpaid, zero, refunded or billing
+  anything besides this key, and an invoice with a refund already booked on it.
+- **Active, Suspended or Terminated** orders refund alike, so "terminate now, refund later"
+  works inside the window. The key is ended again every time (`ModuleTerminate`), because a
+  Terminated status does not prove the key is off (it can be set without the module); if that
+  fails, nothing is returned.
+- **Once.** The credit row a refund writes, `Partner Hub refund of order #N (invoice #M)`,
+  marks it done: a repeat (a lost response, a second click) answers `refunded` with the same
+  `amount` and returns nothing more. The invoice keeps its status: a Refunded status does not
+  prove the credit was returned, and it would run the refund hooks.
+- **Credit not returned after the key ended:** `409 refund_incomplete`, and the activity log
+  names the order. Add the credit by hand with exactly that description; the row is what marks
+  the refund done.
+- **After a refund the order has ended:** `suspend`, `unsuspend` and `renew` answer `409
+  service_ended`.
+
+Every refund is written to the WHMCS activity log. Your own admin can still refund anything by
+hand in WHMCS, renewals included; the window binds only the API.
+
 ## Safety model
 
 - **Credit is the hard limit, applied in full or not at all.** The invoice of an order (and
@@ -214,6 +255,12 @@ pays it — the partner's credit is never consumed. Nothing renews until the con
   that died midway: each step's footprint (the order WHMCS created, the invoice, the token
   recorded on the service) decides whether it happened; only a step that provably did not
   happen is redone, and provisioning never is.
+- **Termination is final through the API.** `suspend`, `unsuspend` and `renew` refuse an
+  ended service (`409 service_ended`), so no sequence of calls brings back a key that was
+  terminated or refunded.
+- **Actions on one account never interleave.** `suspend`, `unsuspend`, `terminate`, `renew`
+  and `refund` run one at a time under the partner client's credit lock, with their status
+  check inside it; a call that waits more than 15 s answers `409 in_progress`.
 - **Scoped authorization.** Every action is scoped to the partner's own `client_id`; a
   partner can only order mapped products and only act on their own services.
 - **Secret at rest.** The API secret is stored hashed (`password_hash`) and verified with

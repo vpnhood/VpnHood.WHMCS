@@ -6,13 +6,14 @@
 # Phases (default: all, in this order):
 #   current        this connector + this Hub: a lost response recovered by Create again, two
 #                  concurrent Creates of one service, Terminate then Create.
-#   old-connector  the connector release partners run today (OLD_CONNECTOR, default v1.2.2)
-#                  against this Hub: the whole buyer lifecycle (purchase-order, suspend,
-#                  unsuspend, terminate, renew) and a repeated Create that buys again.
+#   old-connector  the connector release partners run today (OLD_CONNECTOR, default v1.2.1,
+#                  installed at a reseller in September 2026) against this Hub: the whole
+#                  buyer lifecycle (purchase-order, suspend, unsuspend, terminate, renew) and a
+#                  repeated Create that buys again.
 #   legacy         orders placed by the old connector whose responses were "lost", then this
 #                  connector: Create stops with reconcile, Link returns the original order, a
 #                  wrong link is refused, "Order a new key" buys.
-#   old-hub        this connector against the previous Hub release (OLD_HUB, default v1.2.8):
+#   old-hub        this connector against a Hub without idempotency-v1 (OLD_HUB, default v1.2.8):
 #                  the cached idempotency-v1 is dropped, no Link is offered, the admin is told
 #                  not to press Create again — then back on this Hub, it is learned again.
 #
@@ -36,7 +37,7 @@ VH_ROOT="$(cd "$REPO_ROOT/.." && pwd)"
 SSH_KEY="${WHMCS_DEV_SSH_KEY:-$VH_ROOT/.user/ssh/ssh.openssh}"
 SSH_HOST="${WHMCS_DEV_SSH_HOST:-whmcsdev@webhost-ftps.vpnhood.com}"
 PARTNER_REPO="${PARTNER_REPO:-$VH_ROOT/VpnHood.WHMCS.Partner}"
-OLD_CONNECTOR="${OLD_CONNECTOR:-v1.2.2}"
+OLD_CONNECTOR="${OLD_CONNECTOR:-v1.2.1}"
 OLD_HUB="${OLD_HUB:-v1.2.8}"
 # tests and dev deploys run ONLY against the dev box — never production (account.vpnhood.com)
 case "${SSH_HOST:-}${WHMCS_DEV_URL:-}" in *account.vpnhood.com*) echo "!! REFUSED: production host detected" >&2; exit 1;; esac

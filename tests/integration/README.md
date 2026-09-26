@@ -107,18 +107,44 @@ again on exit:
   concurrent Creates of one service (one order), Terminate then Create (a new key and
   order; the old key `409 key_spent`).
 - `old-connector` — the connector release partners run today (`OLD_CONNECTOR`, default
-  `v1.2.2`) against this Hub: a repeated Create buys again, as it always did, and the whole
-  buyer lifecycle passes (`purchase-order`, `suspend`, `unsuspend`, `terminate`, `renew`).
+  `v1.2.1`, the release installed at a reseller in September 2026) against this Hub: a
+  repeated Create buys again, as it always did, and the whole buyer lifecycle passes
+  (`purchase-order`, `suspend`, `unsuspend`, `terminate`, `renew`).
 - `legacy` — orders placed by the old connector, their responses "lost", then this
   connector: Create stops with `reconcile` (and learns `idempotency-v1` from that `409` with
   an empty cache), the Module tab offers Link, a wrong link is refused, Link returns the
   original order, "Order a new key" buys once.
-- `old-hub` — this connector against the previous Hub (`OLD_HUB`, default `v1.2.8`): the
+- `old-hub` — this connector against a Hub without `idempotency-v1` (`OLD_HUB`, default `v1.2.8`): the
   cached `idempotency-v1` is dropped, the admin is told not to press Create again, no Link is
   offered, a repeat there buys again; back on this Hub, the feature is learned again.
 
 ⚠ Spends buyer and reseller (test) credit; `old-connector` runs `purchase-order.test.sh`,
 which wipes the buyer's and reseller's earlier orders.
+
+## refund.test.sh — partner refunds
+
+**`refund.test.sh [scenario ...]`** — runs the scenarios of `refund.test.php` on the dev box.
+Orders go through the real Hub API over HTTPS as the test partner (`.env`); the connector
+scenarios press the Refund button through `ModuleCustom` on a buyer service.
+
+| Scenario | What it proves |
+| --- | --- |
+| `refund` | a new key refunds: key disabled, service Terminated, the price back once with its credit row and activity-log line; a repeat answers `refunded` and returns nothing more; `suspend`/`unsuspend`/`renew` then `409 service_ended`, `terminate` still runs |
+| `terminate-first` | terminate, then refund: the module Terminate runs again on the Terminated service, the price comes back |
+| `suspended` | a suspended key refunds; `unsuspend` is refused afterwards |
+| `window` | paid 4 days ago with the default 3 days: `refund_window_closed`, nothing ended or returned; `PartnerRefundDays` = 5 refunds it; `0` refuses (refunds off) |
+| `later-invoice` | a key with a renewal invoice (`GenInvoices`, then cancelled) is `not_refundable` |
+| `records` | an unfinished purchase, no purchase record, an extra invoice line, a refund booked by hand: each `not_refundable` and changes nothing; restored, the order refunds |
+| `concurrent` | two refunds of one order at once: both `refunded`, one credit |
+| `lock` | an unsuspend and a refund queued behind the partner's credit lock (held by the test): whichever runs first, the key ends and the price returns once |
+| `timeout` | a suspend that cannot get the lock in 15 s: `409 in_progress`, nothing changed |
+| `connector` | the connector's Refund: buyer service Terminated, idempotency key cleared, the reseller's credit back, pressing it again returns nothing more; against the previous Hub release (`OLD_HUB`, default `v1.2.9`, deployed from its tag and replaced again on exit) it says the Hub does not offer refunds and changes nothing |
+
+⚠ Spends reseller and buyer (test) credit and provisions real tokens; every order ends refunded
+or terminated. Settings, invoice dates and lines, a ledger row and purchase-record fields a
+scenario changes are restored in a `finally`.
+
+The rules themselves (`RefundPolicy`) are unit-tested without WHMCS: `tests/unit/run.sh`.
 
 ## hub-api.test.sh — Hub API black-box test
 

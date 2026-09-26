@@ -125,6 +125,9 @@ a secured API; it does not own credit or provisioning.**
   `ApiService`/`Helper`; resume, `linkOrder`, and the admin Retry/Release.
 - `lib/PurchaseRepository.php` — `mod_vpnhood_partner_purchases`, its first-use initialization,
   the named locks, and the footprint queries.
+- `lib/RefundPolicy.php` — whether an order may be refunded through the API, decided from facts
+  the caller reads; no database, so `tests/unit` checks every rule (see *Service actions and
+  refunds*).
 - `lib/PartnerRepository.php` — data access + native credit reads.
 - `lib/LocalApi.php` — `localAPI` with failures turned into readable 422s (see below).
 - `lib/ApiException.php` — carries an HTTP status, and optionally a machine-readable `code`
@@ -286,7 +289,7 @@ batch) and set the service Active — never press Create then. Confirmed none an
 finished → press Create on the service. Then Retry. Unresolved → it stays in the list.
 
 **`upstreamOrderId` is the connector-facing handle** for every subsequent action (`renew`,
-`suspend`, `unsuspend`, `terminate`, `getOrder`, `getAccessCode`). It is the WHMCS **order id**;
+`suspend`, `unsuspend`, `terminate`, `refund`, `getOrder`, `getAccessCode`). It is the WHMCS **order id**;
 `ownedServiceByOrder()` resolves it to the service *and* scopes on `partner.client_id` in the
 same query, so another partner's order simply returns `404`. `getAccessCode` re-reads the code
 live from the access server, resolving `accessTokenId` from the partner's own service rather
@@ -360,8 +363,8 @@ invoice and its email exactly as standard; it simply stays **Unpaid** until the 
 > (Configuration → System Settings → General Settings → Credit). This is the mechanism: with
 > it off, no invoice is ever paid from credit on its own, so renewal invoices naturally stay
 > Unpaid. The Hub instead applies credit **explicitly**, only where it means to
-> (`PurchaseProcessor::payLocked` and `::settleInvoice`). If someone turns this setting back
-> on, partner services silently revert to auto-renewing.
+> (`PurchaseProcessor::payLocked` and `::settleInvoiceLocked`). If someone turns this setting
+> back on, partner services silently revert to auto-renewing.
 
 - **Order:** the payment step applies the order invoice's full balance from credit, or nothing,
   before provisioning — so ordering still fails closed on insufficient credit (`402` + rollback).
@@ -369,8 +372,9 @@ invoice and its email exactly as standard; it simply stays **Unpaid** until the 
   `nextduedate` does not advance while it is unpaid, and the token expiry tracks `nextduedate`,
   so **access stops on the real term end** until the partner renews.
 - **Renew:** `PartnerApiController::renew` pays the outstanding invoice from native credit
-  (`402` if short, `409` if nothing outstanding) under the same credit lock as orders, so a
-  renewal and an order competing for the last credit cannot both spend it. Paying a Hosting
+  (`402` if short, `409` if nothing outstanding, `409 service_ended` for an ended service) under
+  the same credit lock as orders, held from its status check to its expiry update, so a renewal
+  and an order competing for the last credit cannot both spend it. Paying a Hosting
   renewal invoice drives WHMCS's normal renewal — `nextduedate` advances one cycle and
   `vpnhoodstore_Renew` re-syncs the token; the call then re-asserts the token expiry
   idempotently.
@@ -388,6 +392,66 @@ invoice and its email exactly as standard; it simply stays **Unpaid** until the 
 > paying the renewal invoice triggers the native renewal (`nextduedate` advance +
 > `vpnhoodstore_Renew`). Cancelling an order returns credit applied to an **unpaid** invoice,
 > but not to a **paid** one — which is why a paid order is never rolled back.
+
+## Service actions and refunds
+
+The rules a partner sees are in the addon `README.md` (*Refunds*); the reasons are here. The
+business rule (partner-facing) is in the VpnHood repo, `docs/accounts/account-lifecycle.md` §8.
+
+**One lock per account.** `suspend`, `unsuspend`, `terminate`, `renew` and `refund` run under
+the partner client's credit lock (`PartnerApiController::withServiceLock`, 15 s, then `409
+in_progress`) with their status check inside it. Without it an unsuspend that read "Suspended"
+before a refund ended the key could finish after it and enable the key again. `renew` holds the
+lock through settle and expiry update, so `settleInvoiceLocked` no longer takes its own.
+
+**Termination is final through the API.** `suspend`, `unsuspend` and `renew` refuse an ended
+service (Terminated, Cancelled, Fraud: `409 service_ended`); `terminate` still runs. Otherwise
+refund → suspend → unsuspend → renew brought a refunded key back: suspend and unsuspend move
+WHMCS's status back to Active, and a renewal sets the key's expiry from the old `nextduedate`,
+so the partner got the refunded term back along with the one they paid for.
+
+**Refunds** (`PurchaseProcessor::refundLocked`, rules in `RefundPolicy`):
+
+- **The refundable invoice is the Hub's own purchase record** (`mod_vpnhood_partner_purchases`,
+  state `delivered`): the invoice the Hub paid from the partner's credit. A Paid invoice alone
+  proves nothing: an admin can mark an invoice paid or write it off, create a service by hand,
+  or move a service to another client (its invoices stay with the old one). Anything without
+  that record is refused and refunded by hand.
+- **Only the first purchase, and only while nothing else is invoiced for the service.** A
+  renewal is never refunded through the API: ending the key would take the earlier, still-paid
+  term. A later invoice, paid or not, also blocks refunding the purchase: WHMCS puts same-day
+  renewals of several services on one invoice and `renew` pays it whole, so a refunded
+  service's renewal line would otherwise be paid by renewing another service.
+- **The key ends before the credit moves, every time** (`ModuleTerminate`, also on a
+  Terminated service; verified to run the module again on WHMCS 9.0.7). A Terminated status
+  does not prove the key is off (the status dropdown sets it without the module). A failure
+  there returns nothing.
+- **The credit row is the once-only guard, not the invoice status.** `AddCredit` writes
+  `tblcredit` with the description `RefundPolicy::creditDescription()`; a repeat finds it and
+  answers `refunded` with its amount. Marking the invoice Refunded was rejected: a crash
+  between the status change and the credit would report a refund nobody received, and the
+  status change fires the InvoiceRefunded hooks (the refund-terminate hook, and
+  `vpnhood-refund-memory.php`, which would fingerprint the partner). If `AddCredit` fails after
+  the key ended: `409 refund_incomplete` and an activity-log line saying to add the credit by
+  hand **with that description**, which is what marks it done.
+- **No feature flag.** A Hub without `refund` answers `404 Unknown action` and changes nothing,
+  so the connector needs no gate; it says "does not offer refunds yet" instead.
+- **Not built, on purpose:** an automatic refund when a partner refunds their own customer (a
+  hook on the partner's WHMCS; resellers press Refund), and management codes for partners
+  (mcode.vpnhood.com can only disable a code that was never used or is within 3 days of first
+  use; Suspend and Terminate cover every connector order). The window is one Hub-wide setting,
+  not per partner.
+
+Known limits, left as they are:
+
+- **Status drift.** When we suspend or terminate a partner's service from our WHMCS, the
+  partner's WHMCS still shows it Active; nothing pushes the change downstream.
+- **Terminate leaves renewal lines on shared invoices.** This predates refunds: a service
+  terminated after its renewal invoice was generated keeps its line on that invoice, and when it
+  shares the invoice with other services, renewing one of them pays the dead line too. The
+  partner loses that amount; the key stays off.
+- **`AddCredit` is not atomic** with the balance update, the same as every order's
+  `applyCredit`: the window is a crash between two SQL statements inside one WHMCS call.
 
 ## Extending
 
@@ -485,7 +549,10 @@ The integration suites in `tests/integration/` run against the dev WHMCS (see it
 `hub-api.test.sh` (the API over HTTP, keyed and keyless ordering, reconcile, `linkOrder`),
 `purchase-recovery.test.sh` (every failure path of a purchase and its recovery),
 `connector-idempotency.test.sh` (the connector's side, and both directions of compatibility
-with the previous releases), plus the buyer lifecycle scripts. By hand, against a live WHMCS:
+with the previous releases), `refund.test.sh` (refunds, the service-action lock and the ended
+guards, the connector's Refund button), plus the buyer lifecycle scripts. `tests/unit/run.sh`
+runs the unit tests (pure PHP, e.g. `RefundPolicy`) with the dev box's PHP, since there is none
+locally. By hand, against a live WHMCS:
 
 1. Activate `vpnhoodpartnerhub`; confirm the four tables exist.
 2. Create a partner linked to a WHMCS client, add credit, map a product.
@@ -495,3 +562,5 @@ with the previous releases), plus the buyer lifecycle scripts. By hand, against 
    Repeat the `order` with the same `idempotencyKey`: same `upstreamOrderId`,
    `replayed: true`, credit unchanged.
 4. Exercise `renew`/`suspend`/`unsuspend`/`terminate` and confirm effects + module log.
+5. `refund` a new order: the service Terminated, the key disabled, the price back on the credit
+   with one `Partner Hub refund of order #N (invoice #M)` row; a repeat returns nothing more.
