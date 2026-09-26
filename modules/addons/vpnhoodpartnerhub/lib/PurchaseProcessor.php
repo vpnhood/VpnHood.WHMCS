@@ -6,6 +6,8 @@ use WHMCS\Database\Capsule;
 use WHMCS\Module\Server\VpnHoodStore\ApiService;
 use WHMCS\Module\Server\VpnHoodStore\Helper;
 
+require_once __DIR__ . '/RefundPolicy.php';
+
 /**
  * Runs a purchase one confirmed step at a time — created → ordered (AddOrder) → paid (credit)
  * → provisioned (AcceptOrder) → delivered (key read) — saving each step's result before the
@@ -26,7 +28,7 @@ class PurchaseProcessor
 {
     /** How long a repeat waits for the original; below the web server's 30 s timeout. */
     public const KEY_LOCK_SECONDS = 20;
-    private const CREDIT_LOCK_SECONDS = 15;
+    public const CREDIT_LOCK_SECONDS = 15;
     private const LIVE_STATUSES = ['Active', 'Suspended'];
 
     private PartnerRepository $repo;
@@ -144,37 +146,89 @@ class PurchaseProcessor
     }
 
     /**
-     * Pay an existing invoice (a renewal) in full from the partner's credit, or not at all.
+     * Pay an existing invoice (a renewal) in full from the partner's credit, or not at all. The
+     * caller holds the client's credit lock (PartnerApiController runs every service action under it).
      *
      * @throws ApiException
      */
-    public function settleInvoice(int $invoiceId): void
+    public function settleInvoiceLocked(int $invoiceId): void
     {
         $clientId = (int) $this->partner['client_id'];
-        $lock = PurchaseRepository::creditLock($clientId);
-        if (!$this->purchases->lock($lock, self::CREDIT_LOCK_SECONDS)) {
-            throw new ApiException('Another payment from this credit balance is still running; retry shortly.', 409, 'in_progress');
-        }
-        try {
-            // Re-read inside the lock: an order or another renewal may have spent the credit meanwhile.
-            $balance = $this->repo->invoiceBalance($invoiceId);
-            $credit = $this->repo->getClientCredit($clientId);
-            if ($balance > 0) {
-                if ($credit + 0.005 < $balance) {
-                    throw new ApiException(
-                        "Insufficient credit to renew. Invoice balance: {$balance}, available: {$credit}.",
-                        402,
-                        'insufficient_credit'
-                    );
-                }
-                $this->applyCredit($invoiceId, $clientId, $balance);
+        // Read under the lock: an order or another renewal may have spent the credit meanwhile.
+        $balance = $this->repo->invoiceBalance($invoiceId);
+        $credit = $this->repo->getClientCredit($clientId);
+        if ($balance > 0) {
+            if ($credit + 0.005 < $balance) {
+                throw new ApiException(
+                    "Insufficient credit to renew. Invoice balance: {$balance}, available: {$credit}.",
+                    402,
+                    'insufficient_credit'
+                );
             }
-        } finally {
-            $this->purchases->unlock($lock);
+            $this->applyCredit($invoiceId, $clientId, $balance);
         }
         if (Capsule::table('tblinvoices')->where('id', $invoiceId)->value('status') !== 'Paid') {
             throw new ApiException('Renewal invoice could not be settled from credit.', 402);
         }
+    }
+
+    /**
+     * Refund an order the Hub sold (docs/ARCHITECTURE.md, "Service actions and refunds"): end its
+     * key, then return the invoice total to the partner's credit. The caller holds the client's credit lock, so
+     * the check for an earlier refund and the credit it guards cannot interleave with another.
+     *
+     * @throws ApiException
+     */
+    public function refundLocked(int $orderId, int $serviceId, int $days): array
+    {
+        $clientId = (int) $this->partner['client_id'];
+        $purchase = $this->purchases->findByOrder($this->partnerId(), $orderId);
+        $invoiceId = (int) ($purchase['invoice_id'] ?? 0);
+        $description = RefundPolicy::creditDescription($orderId, $invoiceId);
+
+        // A repeat (a lost response, a second click) answers from the credit already returned.
+        $returned = $invoiceId > 0 ? $this->returnedCredit($clientId, $description) : null;
+        if ($returned !== null) {
+            return ['upstreamOrderId' => $orderId, 'status' => 'refunded', 'amount' => $returned];
+        }
+
+        $facts = $this->refundFacts($orderId, $serviceId, $purchase);
+        $refusal = RefundPolicy::refusal($facts, $days, time());
+        if ($refusal !== null) {
+            throw new ApiException($refusal['message'], $refusal['status'], $refusal['code'], ['upstreamOrderId' => $orderId]);
+        }
+
+        // The key ends first, every time: a Terminated status alone does not prove the key is
+        // off (it can be set without the module), and a failure here must return nothing.
+        try {
+            LocalApi::call('ModuleTerminate', ['serviceid' => $serviceId]);
+        } catch (ApiException $e) {
+            throw new ApiException(
+                "Order #{$orderId} was not refunded: ending its key failed ({$e->getMessage()}). Nothing was returned.",
+                422,
+                'not_refundable',
+                ['upstreamOrderId' => $orderId]
+            );
+        }
+
+        $amount = round($facts['invoice']['total'], 2);
+        try {
+            LocalApi::call('AddCredit', ['clientid' => $clientId, 'description' => $description, 'amount' => $amount]);
+        } catch (ApiException $e) {
+            logActivity("Partner Hub: order #{$orderId} was terminated for a refund, but returning {$amount} to the credit of"
+                . " client #{$clientId} failed ({$e->getMessage()}). Add the credit by hand with the description \"{$description}\";"
+                . ' that row is what marks the refund done.', $clientId);
+            throw new ApiException(
+                "The key of order #{$orderId} is ended, but returning {$amount} to your credit failed. Contact VpnHood support"
+                . " and quote invoice #{$invoiceId}.",
+                409,
+                'refund_incomplete',
+                ['upstreamOrderId' => $orderId]
+            );
+        }
+        logActivity("Partner Hub: order #{$orderId} refunded: its key is ended and {$amount} returned to the credit of client"
+            . " #{$clientId} (invoice #{$invoiceId}).", $clientId);
+        return ['upstreamOrderId' => $orderId, 'status' => 'refunded', 'amount' => $amount];
     }
 
     /**
@@ -869,6 +923,60 @@ class PurchaseProcessor
         }
         $row = $query->selectRaw('COALESCE(SUM(amountin), 0) - COALESCE(SUM(amountout), 0) AS net')->first();
         return round((float) ($row->net ?? 0), 2);
+    }
+
+    /** The amount an earlier refund returned (its credit row), or null when there was none. */
+    private function returnedCredit(int $clientId, string $description): ?float
+    {
+        $amount = Capsule::table('tblcredit')->where('clientid', $clientId)->where('description', $description)->value('amount');
+        return $amount === null ? null : round((float) $amount, 2);
+    }
+
+    /** What RefundPolicy decides on, read from the purchase record, its invoice and the service's other invoices. */
+    private function refundFacts(int $orderId, int $serviceId, ?array $purchase): array
+    {
+        $invoiceId = (int) ($purchase['invoice_id'] ?? 0);
+        $invoice = $invoiceId > 0
+            ? Capsule::table('tblinvoices')->where('id', $invoiceId)->first(['userid', 'status', 'total', 'datepaid'])
+            : null;
+        return [
+            'orderId'         => $orderId,
+            'serviceId'       => $serviceId,
+            'partnerClientId' => (int) $this->partner['client_id'],
+            'purchase'        => $purchase === null ? null : [
+                'state'     => (string) $purchase['state'],
+                'clientId'  => (int) $purchase['client_id'],
+                'serviceId' => (int) $purchase['service_id'],
+                'invoiceId' => $invoiceId,
+            ],
+            'invoice'         => $invoice === null ? null : [
+                'userId'   => (int) $invoice->userid,
+                'status'   => (string) $invoice->status,
+                'total'    => (float) $invoice->total,
+                'datePaid' => (string) $invoice->datepaid,
+            ],
+            'items'           => $invoiceId > 0
+                ? array_map(fn ($i) => ['type' => (string) $i->type, 'relid' => (int) $i->relid],
+                    Capsule::table('tblinvoiceitems')->where('invoiceid', $invoiceId)->get(['type', 'relid'])->all())
+                : [],
+            // A refund WHMCS's own Refund action booked: the rows the vpnhoodstore refund hook counts.
+            'refundBooked'    => $invoiceId > 0 && Capsule::table('tblaccounts')->where('invoiceid', $invoiceId)
+                ->where('amountout', '>', 0)
+                ->where(fn ($q) => $q->where('refundid', '>', 0)->orWhere('type', 'gateway_funds_out'))
+                ->exists(),
+            // Anything else invoiced for the service (a renewal, paid or not), unless cancelled.
+            'laterInvoiceIds' => Capsule::table('tblinvoiceitems as i')
+                ->join('tblinvoices as inv', 'inv.id', '=', 'i.invoiceid')
+                ->where('i.relid', $serviceId)
+                ->whereIn('i.type', ['Hosting', 'PromoHosting'])
+                ->where('inv.id', '!=', $invoiceId)
+                ->where('inv.status', '!=', 'Cancelled')
+                ->orderBy('inv.id')
+                ->distinct()
+                ->pluck('inv.id')
+                ->map(fn ($id) => (int) $id)
+                ->all(),
+        ];
     }
 
     /** CSV (batch) delivery, by the same rule vpnhoodstore provisions and guards with. */

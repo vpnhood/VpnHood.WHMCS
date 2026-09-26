@@ -36,6 +36,9 @@ class PartnerApiController
     /** Advertised in the X-Vpnhood-Hub-Features header of every response (api.php). */
     public const FEATURES = 'idempotency-v1';
 
+    /** A service in one of these has ended: its key was terminated (or refunded) and stays that way. */
+    private const ENDED_STATUSES = ['Terminated', 'Cancelled', 'Fraud'];
+
     private PartnerRepository $repo;
     private array $partner;
 
@@ -62,6 +65,7 @@ class PartnerApiController
             case 'unsuspend':       return $this->unsuspend($body);
             case 'terminate':       return $this->terminate($body);
             case 'cancel':          return $this->terminate($body); // alias
+            case 'refund':          return $this->refund($body);
             case 'getOrder':        return $this->getOrder($body);
             case 'getAccessCode':   return $this->getAccessCode($body);
             case 'getTransactions': return $this->getTransactions();
@@ -300,6 +304,10 @@ class PartnerApiController
     }
 
     // -- Lifecycle relays ---------------------------------------------------
+    //
+    // Every action on a service runs under the partner client's credit lock, with its status
+    // check inside it (withServiceLock). A refund therefore never interleaves with another
+    // action on the same account: an unsuspend finishing after a refund would revive its key.
 
     /**
      * Renew a service by settling its outstanding renewal invoice from the partner's
@@ -313,45 +321,48 @@ class PartnerApiController
      * never calls it, the token expires on the term end date and access stops.
      *
      * Services whose product is not Hub-mapped (one-time products, or anything created
-     * outside the Hub) keep the original expiry re-sync behavior.
+     * outside the Hub) keep the original expiry re-sync behavior. An ended service is
+     * refused by both.
      */
     private function renew(array $body): array
     {
         $orderId = $this->requestedOrderId($body);
-        $serviceId = (int) $this->ownedServiceByOrder($orderId)->id;
+        return $this->withServiceLock(function () use ($orderId): array {
+            $serviceId = (int) $this->liveServiceByOrder($orderId, 'renewed')->id;
 
-        if (!$this->repo->isPartnerProductService($serviceId)) {
-            return $this->resyncExpiry($orderId, $serviceId);
-        }
-
-        $invoiceId = $this->repo->outstandingRenewalInvoiceId($serviceId);
-        if ($invoiceId === null) {
-            throw new ApiException(
-                'No renewal invoice is currently outstanding for this service. Renewal becomes '
-                . 'available once WHMCS has generated the upcoming renewal invoice.',
-                409
-            );
-        }
-
-        // In full or not at all, under the same credit lock as orders: paying a Hosting renewal
-        // invoice is what triggers WHMCS's standard renewal (nextduedate advance + vpnhoodstore_Renew).
-        $this->processor(false)->settleInvoice($invoiceId);
-
-        // Guarantee the token expiry matches the (now advanced) nextduedate, whether or
-        // not paying the invoice already ran vpnhoodstore_Renew. Idempotent either way.
-        $model = \WHMCS\Service\Service::find($serviceId);
-        if ($model) {
-            $result = Helper::renew(['model' => $model]);
-            if ($result !== 'success') {
-                throw new ApiException($result, 502);
+            if (!$this->repo->isPartnerProductService($serviceId)) {
+                return $this->resyncExpiry($orderId, $serviceId);
             }
-        }
 
-        return [
-            'upstreamOrderId' => $orderId,
-            'status'          => 'renewed',
-            'nextDueDate'     => $this->repo->serviceNextDueDate($serviceId),
-        ];
+            $invoiceId = $this->repo->outstandingRenewalInvoiceId($serviceId);
+            if ($invoiceId === null) {
+                throw new ApiException(
+                    'No renewal invoice is currently outstanding for this service. Renewal becomes '
+                    . 'available once WHMCS has generated the upcoming renewal invoice.',
+                    409
+                );
+            }
+
+            // In full or not at all: paying a Hosting renewal invoice is what triggers WHMCS's
+            // standard renewal (nextduedate advance + vpnhoodstore_Renew).
+            $this->processor(false)->settleInvoiceLocked($invoiceId);
+
+            // Guarantee the token expiry matches the (now advanced) nextduedate, whether or
+            // not paying the invoice already ran vpnhoodstore_Renew. Idempotent either way.
+            $model = \WHMCS\Service\Service::find($serviceId);
+            if ($model) {
+                $result = Helper::renew(['model' => $model]);
+                if ($result !== 'success') {
+                    throw new ApiException($result, 502);
+                }
+            }
+
+            return [
+                'upstreamOrderId' => $orderId,
+                'status'          => 'renewed',
+                'nextDueDate'     => $this->repo->serviceNextDueDate($serviceId),
+            ];
+        });
     }
 
     /**
@@ -380,33 +391,91 @@ class PartnerApiController
     private function suspend(array $body): array
     {
         $orderId = $this->requestedOrderId($body);
-        $serviceId = (int) $this->ownedServiceByOrder($orderId)->id;
-        $params = ['serviceid' => $serviceId];
         $suspendReason = (string) ($body['suspendReason'] ?? '');
-        if ($suspendReason !== '') {
-            $params['suspendreason'] = $suspendReason;
-        }
-        LocalApi::call('ModuleSuspend', $params);
-        return ['upstreamOrderId' => $orderId, 'status' => 'suspended'];
+        return $this->withServiceLock(function () use ($orderId, $suspendReason): array {
+            $params = ['serviceid' => (int) $this->liveServiceByOrder($orderId, 'suspended')->id];
+            if ($suspendReason !== '') {
+                $params['suspendreason'] = $suspendReason;
+            }
+            LocalApi::call('ModuleSuspend', $params);
+            return ['upstreamOrderId' => $orderId, 'status' => 'suspended'];
+        });
     }
 
     private function unsuspend(array $body): array
     {
         $orderId = $this->requestedOrderId($body);
-        $serviceId = (int) $this->ownedServiceByOrder($orderId)->id;
-        LocalApi::call('ModuleUnsuspend', ['serviceid' => $serviceId]);
-        return ['upstreamOrderId' => $orderId, 'status' => 'active'];
+        return $this->withServiceLock(function () use ($orderId): array {
+            LocalApi::call('ModuleUnsuspend', ['serviceid' => (int) $this->liveServiceByOrder($orderId, 'unsuspended')->id]);
+            return ['upstreamOrderId' => $orderId, 'status' => 'active'];
+        });
     }
 
     private function terminate(array $body): array
     {
         $orderId = $this->requestedOrderId($body);
-        $serviceId = (int) $this->ownedServiceByOrder($orderId)->id;
-        LocalApi::call('ModuleTerminate', ['serviceid' => $serviceId]);
-        return ['upstreamOrderId' => $orderId, 'status' => 'terminated'];
+        return $this->withServiceLock(function () use ($orderId): array {
+            LocalApi::call('ModuleTerminate', ['serviceid' => (int) $this->ownedServiceByOrder($orderId)->id]);
+            return ['upstreamOrderId' => $orderId, 'status' => 'terminated'];
+        });
+    }
+
+    /**
+     * Refund an order the Hub sold: its key ends and the invoice total returns to the partner's
+     * credit, inside the admin-set window (PurchaseProcessor::refundLocked, RefundPolicy).
+     */
+    private function refund(array $body): array
+    {
+        $orderId = $this->requestedOrderId($body);
+        $processor = $this->processor(true);
+        $days = $this->repo->settings()['refundDays'];
+        return $this->withServiceLock(
+            fn (): array => $processor->refundLocked($orderId, (int) $this->ownedServiceByOrder($orderId)->id, $days)
+        );
     }
 
     // -- Helpers ------------------------------------------------------------
+
+    /**
+     * Run a service action under the partner client's credit lock, the lock every payment from
+     * that credit takes too (PurchaseProcessor).
+     *
+     * @throws ApiException
+     */
+    private function withServiceLock(callable $action): array
+    {
+        $purchases = new PurchaseRepository();
+        $lock = PurchaseRepository::creditLock((int) $this->partner['client_id']);
+        if (!$purchases->lock($lock, PurchaseProcessor::CREDIT_LOCK_SECONDS)) {
+            throw new ApiException('Another request on this account is still running; retry shortly.', 409, 'in_progress');
+        }
+        try {
+            return $action();
+        } finally {
+            $purchases->unlock($lock);
+        }
+    }
+
+    /**
+     * The order's service, refused once it has ended: termination is final through this API, so
+     * no suspend, unsuspend or renewal brings back a key that was terminated or refunded.
+     *
+     * @throws ApiException
+     */
+    private function liveServiceByOrder(int $orderId, string $actionPast)
+    {
+        $service = $this->ownedServiceByOrder($orderId);
+        $status = (string) $service->domainstatus;
+        if (in_array($status, self::ENDED_STATUSES, true)) {
+            throw new ApiException(
+                "Order #{$orderId} is {$status}: an ended key cannot be {$actionPast}. Buy a new key instead.",
+                409,
+                'service_ended',
+                ['upstreamOrderId' => $orderId, 'status' => $status]
+            );
+        }
+        return $service;
+    }
 
     /**
      * Read and validate the upstream order id from a request body.

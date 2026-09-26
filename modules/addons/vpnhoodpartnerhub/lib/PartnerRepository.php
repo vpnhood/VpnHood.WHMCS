@@ -4,6 +4,8 @@ namespace WHMCS\Module\Addon\VpnHoodPartnerHub;
 
 use WHMCS\Database\Capsule;
 
+require_once __DIR__ . '/RefundPolicy.php';
+
 /**
  * Data access for partners, product mappings, and native WHMCS credit balance.
  *
@@ -24,6 +26,7 @@ class PartnerRepository
                 || ($rows['RequireIpAllowlist'] ?? 'no') === 'yes'),
             'currency'           => $rows['DefaultCurrency'] ?? 'USD',
             'orderGateway'       => trim($rows['OrderGateway'] ?? ''),
+            'refundDays'         => RefundPolicy::days($rows['PartnerRefundDays'] ?? null),
         ];
     }
 
