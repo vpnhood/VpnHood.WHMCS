@@ -12,7 +12,7 @@ final class RefundPolicy
     public const DEFAULT_DAYS = 7;
 
     /** Invoice lines that bill the service itself (its price, and a promotion on it). */
-    private const SERVICE_LINE_TYPES = ['Hosting', 'PromoHosting'];
+    public const SERVICE_LINE_TYPES = ['Hosting', 'PromoHosting'];
 
     /**
      * The PartnerRefundDays setting: blank or never saved means the default, a whole number is

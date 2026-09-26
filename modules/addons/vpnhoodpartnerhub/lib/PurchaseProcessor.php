@@ -31,6 +31,9 @@ class PurchaseProcessor
     public const CREDIT_LOCK_SECONDS = 15;
     private const LIVE_STATUSES = ['Active', 'Suspended'];
 
+    /** A service in one of these has ended: its key was terminated (or refunded) and stays that way. */
+    public const ENDED_STATUSES = ['Terminated', 'Cancelled', 'Fraud'];
+
     private PartnerRepository $repo;
     private PurchaseRepository $purchases;
     private array $partner;
@@ -146,14 +149,16 @@ class PurchaseProcessor
     }
 
     /**
-     * Pay an existing invoice (a renewal) in full from the partner's credit, or not at all. The
-     * caller holds the client's credit lock (PartnerApiController runs every service action under it).
+     * Pay an existing invoice (a renewal) in full from the partner's credit, or not at all, once
+     * the lines of ended keys are off it. The caller holds the client's credit lock
+     * (PartnerApiController runs every service action under it).
      *
      * @throws ApiException
      */
     public function settleInvoiceLocked(int $invoiceId): void
     {
         $clientId = (int) $this->partner['client_id'];
+        $this->dropEndedKeyLines($invoiceId, $clientId);
         // Read under the lock: an order or another renewal may have spent the credit meanwhile.
         $balance = $this->repo->invoiceBalance($invoiceId);
         $credit = $this->repo->getClientCredit($clientId);
@@ -170,6 +175,47 @@ class PurchaseProcessor
         if (Capsule::table('tblinvoices')->where('id', $invoiceId)->value('status') !== 'Paid') {
             throw new ApiException('Renewal invoice could not be settled from credit.', 402);
         }
+    }
+
+    /**
+     * WHMCS bills a client's same-day renewals on one invoice, so paying it for one key would also
+     * pay for keys the partner has already ended. Their lines come off first. Once anything is paid
+     * on the invoice, taking lines off could leave it overpaid, so the renewal is refused instead
+     * and the invoice is fixed by hand.
+     *
+     * @throws ApiException
+     */
+    private function dropEndedKeyLines(int $invoiceId, int $clientId): void
+    {
+        $lines = Capsule::table('tblinvoiceitems as i')
+            ->join('tblhosting as h', 'h.id', '=', 'i.relid')
+            ->where('i.invoiceid', $invoiceId)
+            ->whereIn('i.type', RefundPolicy::SERVICE_LINE_TYPES)
+            ->whereIn('h.domainstatus', self::ENDED_STATUSES)
+            ->get(['i.id', 'h.orderid'])
+            ->all();
+        if ($lines === []) {
+            return;
+        }
+
+        $orders = implode(', ', array_unique(array_map(fn ($line) => '#' . $line->orderid, $lines)));
+        $total = (float) Capsule::table('tblinvoices')->where('id', $invoiceId)->value('total');
+        if ($this->repo->invoiceBalance($invoiceId) + 0.005 < $total) {
+            throw new ApiException(
+                "Renewal invoice #{$invoiceId} also bills ended order(s) {$orders}, and a payment is already on it, so those"
+                . ' lines cannot be taken off here. Nothing was paid. Contact VpnHood support and quote the invoice.',
+                409,
+                'renewal_blocked',
+                ['invoiceId' => $invoiceId]
+            );
+        }
+
+        LocalApi::call('UpdateInvoice', [
+            'invoiceid'     => $invoiceId,
+            'deletelineids' => array_map(fn ($line) => (int) $line->id, $lines),
+        ]);
+        logActivity("Partner Hub: took ended order(s) {$orders} off renewal invoice #{$invoiceId} before paying it from the"
+            . " credit of client #{$clientId}.", $clientId);
     }
 
     /**

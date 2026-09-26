@@ -150,6 +150,7 @@ for every new purchase. **Without a key, every call buys**, as it always has.
 | `refund_window_closed` | 409 | `refund` after the refund window, or with partner refunds turned off; nothing changed (`terminate` still ends the key, without returning credit) |
 | `not_refundable` | 409 | `refund` of an order the API does not refund (see *Refunds*); nothing changed — VpnHood refunds it by hand if it should be |
 | `refund_incomplete` | 409 | `refund` ended the key but could not return the credit; VpnHood support finishes it (quote the invoice) |
+| `renewal_blocked` | 409 | `renew` of a key whose renewal invoice also bills ended keys and already has a payment on it (`details.invoiceId`); nothing was paid — VpnHood support fixes the invoice |
 
 `linkOrder` never buys: a Hub without it answers `404 Unknown action`. It binds the order you
 name — only a live, finished, keyless order of yours placed with the same product, billing
@@ -197,6 +198,10 @@ pays it — the partner's credit is never consumed. Nothing renews until the con
 
 - `renew` settles the outstanding renewal invoice from the partner's native credit, which
   advances the service one billing cycle and extends the access-server token.
+- A renewal never pays for an ended key. WHMCS puts one client's same-day renewals on one
+  invoice, so `renew` first takes off the lines of keys that are Terminated, Cancelled or Fraud.
+  If a payment is already on that invoice, it answers `409 renewal_blocked` instead and pays
+  nothing.
 - `402` — not enough credit to cover the invoice; nothing changes.
 - `409` — no renewal invoice is outstanding yet. One exists once WHMCS has generated the
   upcoming renewal invoice (inside its Invoice Generation window before the due date).
@@ -216,8 +221,8 @@ way credit comes back through the API.
 - **Only a new key's first purchase.** The refundable invoice is the one the Hub paid from the
   partner's credit when it placed the order (its purchase record). A renewal is never refunded
   through the API, and neither is the purchase once anything else is invoiced for the service
-  (a renewal invoice, paid or not): ending the key would take that term too, and WHMCS puts
-  same-day renewals of several services on one invoice that `renew` pays whole.
+  (a renewal invoice, paid or not): ending the key would take a paid term too. A renewal line
+  that `renew` took off an ended key no longer counts, since that renewal was never paid.
 - **Refused, and left to VpnHood to refund by hand** (`409 not_refundable`, nothing changes): an
   order the Hub did not sell to this partner (created or paid by hand, or moved from another
   client), a purchase that never finished, an invoice that is unpaid, zero, refunded or billing

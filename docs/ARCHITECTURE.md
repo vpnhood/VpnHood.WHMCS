@@ -403,6 +403,16 @@ refund → suspend → unsuspend → renew brought a refunded key back: suspend 
 WHMCS's status back to Active, and a renewal sets the key's expiry from the old `nextduedate`,
 so the partner got the refunded term back along with the one they paid for.
 
+**Renew never pays for an ended key.** WHMCS bills a client's same-day renewals on one invoice,
+and `renew` pays the invoice whole, so renewing one key paid for keys the partner had already
+ended. `settleInvoiceLocked` first takes the `Hosting`/`PromoHosting` lines of Terminated,
+Cancelled or Fraud services off the invoice (`UpdateInvoice` `deletelineids`, which
+recalculates the total) and logs it. It checks at payment time, not on termination, because a
+key can end in ways no hook sees (the status dropdown runs no module). Once anything is paid on
+the invoice, taking lines off could leave it overpaid, so `renew` is refused instead (`409
+renewal_blocked`) and the invoice is fixed by hand; with Automatic Credit Use off, only a
+payment made by hand gets there.
+
 **Refunds** (`PurchaseProcessor::refundLocked`, rules in `RefundPolicy`):
 
 - **The refundable invoice is the Hub's own purchase record** (`mod_vpnhood_partner_purchases`,
@@ -412,9 +422,9 @@ so the partner got the refunded term back along with the one they paid for.
   that record is refused and refunded by hand.
 - **Only the first purchase, and only while nothing else is invoiced for the service.** A
   renewal is never refunded through the API: ending the key would take the earlier, still-paid
-  term. A later invoice, paid or not, also blocks refunding the purchase: WHMCS puts same-day
-  renewals of several services on one invoice and `renew` pays it whole, so a refunded
-  service's renewal line would otherwise be paid by renewing another service.
+  term. A later invoice, paid or not, also blocks refunding the purchase. A line `renew` took
+  off an ended key no longer counts, so that key refunds inside its window: its renewal was
+  never paid.
 - **The key ends before the credit moves, every time** (`ModuleTerminate`, also on a
   Terminated service; verified to run the module again on WHMCS 9.0.7). A Terminated status
   does not prove the key is off (the status dropdown sets it without the module). A failure
@@ -439,10 +449,9 @@ Known limits, left as they are:
 
 - **Status drift.** When we suspend or terminate a partner's service from our WHMCS, the
   partner's WHMCS still shows it Active; nothing pushes the change downstream.
-- **Terminate leaves renewal lines on shared invoices.** This predates refunds: a service
-  terminated after its renewal invoice was generated keeps its line on that invoice, and when it
-  shares the invoice with other services, renewing one of them pays the dead line too. The
-  partner loses that amount; the key stays off.
+- **Our admin and WHMCS's cron do not take the Hub's lock.** The lock serializes the API's own
+  actions. A key they end while a renewal is between its line check and its payment is still
+  paid for; a key ended before that check is not.
 - **`AddCredit` is not atomic** with the balance update, the same as every order's
   `applyCredit`: the window is a crash between two SQL statements inside one WHMCS call.
 
