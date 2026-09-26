@@ -66,7 +66,7 @@ function vpnhoodpartnerhub_config(): array
                 'Type'         => 'text',
                 'Size'         => '4',
                 'Description'  => 'Days after payment in which a partner can refund a newly bought key through the API: the key ends and its price returns to the partner\'s credit. Renewals are never refundable this way. 0 turns partner refunds off.',
-                'Default'      => '3',
+                'Default'      => '7',
             ],
         ],
     ];

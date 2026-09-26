@@ -311,7 +311,7 @@ case 'suspended':
     expectRefused(hub('unsuspend', ['upstreamOrderId' => $o['orderId']]), 'service_ended', 'cannot be unsuspended', 'unsuspend after the refund');
     break;
 
-// The window: 3 days by default, the admin's PartnerRefundDays when set, and 0 turns refunds off.
+// The window: 7 days by default, the admin's PartnerRefundDays when set, and 0 turns refunds off.
 // A refused refund ends nothing and returns nothing.
 case 'window':
     $previous = refundDaysSetting();
@@ -320,12 +320,12 @@ case 'window':
         setRefundDays(null);
         $o = buy(REF_ONETIME, 'window');
         $before = credit();
-        setDatePaid($o['invoiceId'], time() - 4 * 86400);
-        expectRefused(refund($o['orderId']), 'refund_window_closed', 'closed on', 'paid 4 days ago, with the default 3-day window');
+        setDatePaid($o['invoiceId'], time() - 8 * 86400);
+        expectRefused(refund($o['orderId']), 'refund_window_closed', 'closed on', 'paid 8 days ago, with the default 7-day window');
         expectLive($o, 'after the refused refund');
         expect(abs(credit() - $before) < 0.001, 'the refused refund returned nothing', credit());
-        setRefundDays('5');
-        expectRefunded(refund($o['orderId']), 'the same order with PartnerRefundDays = 5');
+        setRefundDays('10');
+        expectRefunded(refund($o['orderId']), 'the same order with PartnerRefundDays = 10');
         expectEnded($o, 'after that refund');
         $off = buy(REF_ONETIME, 'window-off');
         setRefundDays('0');

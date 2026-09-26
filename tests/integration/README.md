@@ -132,7 +132,7 @@ scenarios press the Refund button through `ModuleCustom` on a buyer service.
 | `refund` | a new key refunds: key disabled, service Terminated, the price back once with its credit row and activity-log line; a repeat answers `refunded` and returns nothing more; `suspend`/`unsuspend`/`renew` then `409 service_ended`, `terminate` still runs |
 | `terminate-first` | terminate, then refund: the module Terminate runs again on the Terminated service, the price comes back |
 | `suspended` | a suspended key refunds; `unsuspend` is refused afterwards |
-| `window` | paid 4 days ago with the default 3 days: `refund_window_closed`, nothing ended or returned; `PartnerRefundDays` = 5 refunds it; `0` refuses (refunds off) |
+| `window` | paid 8 days ago with the default 7 days: `refund_window_closed`, nothing ended or returned; `PartnerRefundDays` = 10 refunds it; `0` refuses (refunds off) |
 | `later-invoice` | a key with a renewal invoice (`GenInvoices`, then cancelled) is `not_refundable` |
 | `records` | an unfinished purchase, no purchase record, an extra invoice line, a refund booked by hand: each `not_refundable` and changes nothing; restored, the order refunds |
 | `concurrent` | two refunds of one order at once: both `refunded`, one credit |

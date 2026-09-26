@@ -7,7 +7,7 @@
 #                     suspend/unsuspend/renew refused afterwards (terminate still runs)
 #   terminate-first   terminate, then refund: the module runs again and the price comes back
 #   suspended         a suspended key refunds; unsuspend is refused afterwards
-#   window            the default 3-day window, PartnerRefundDays = 5, and 0 (refunds off)
+#   window            the default 7-day window, PartnerRefundDays = 10, and 0 (refunds off)
 #   later-invoice     a key with a renewal invoice is refused
 #   records           no purchase record, an unfinished purchase, an extra invoice line, a
 #                     refund booked by hand: each refused, then the restored order refunds
