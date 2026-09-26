@@ -42,7 +42,7 @@ provisioning (the existing `vpnhoodstore` / `Helper` / `ApiService` do that).
    `AddOrder` requires. The gateway only labels the partner order invoices — they are still
    settled from the partner's credit balance — but WHMCS needs a valid one. Set the
    **Partner Refund Window (days)**: how long after payment a partner can refund a new key
-   through the API (default 3; `0` turns partner refunds off; see *Refunds*).
+   through the API (default 7; `0` turns partner refunds off; see *Refunds*).
 
    The field reports the state of the current value in its own description on the
    configuration screen, including immediately after **Save Changes**: green when the value
@@ -211,7 +211,7 @@ pays it — the partner's credit is never consumed. Nothing renews until the con
 the partner's credit balance. `terminate` ends a key and returns nothing; `refund` is the only
 way credit comes back through the API.
 
-- **Window.** *Partner Refund Window (days)* from the moment the invoice was paid: 3 by default,
+- **Window.** *Partner Refund Window (days)* from the moment the invoice was paid: 7 by default,
   `0` turns partner refunds off. After it: `409 refund_window_closed`, nothing changes.
 - **Only a new key's first purchase.** The refundable invoice is the one the Hub paid from the
   partner's credit when it placed the order (its purchase record). A renewal is never refunded

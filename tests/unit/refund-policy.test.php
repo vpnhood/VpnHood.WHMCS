@@ -63,7 +63,7 @@ function refused(?array $refusal, string $code, string $needle, string $case): v
 // -- The PartnerRefundDays setting ---------------------------------------------------------
 
 foreach ([
-    [null, 3, 'never saved'], ['', 3, 'blank'], ['  ', 3, 'spaces'], ['0', 0, '0'], ['3', 3, '3'], ['10', 10, '10'],
+    [null, 7, 'never saved'], ['', 7, 'blank'], ['  ', 7, 'spaces'], ['0', 0, '0'], ['3', 3, '3'], ['10', 10, '10'],
     [' 7 ', 7, 'padded 7'], ['-1', 0, 'negative'], ['2.5', 0, 'a fraction'], ['abc', 0, 'text'],
 ] as [$setting, $days, $case]) {
     check(RefundPolicy::days($setting) === $days, "days($case) = $days", RefundPolicy::days($setting));

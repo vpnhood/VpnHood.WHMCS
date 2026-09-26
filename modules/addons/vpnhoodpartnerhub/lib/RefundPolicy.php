@@ -9,7 +9,7 @@ namespace WHMCS\Module\Addon\VpnHoodPartnerHub;
  */
 final class RefundPolicy
 {
-    public const DEFAULT_DAYS = 3;
+    public const DEFAULT_DAYS = 7;
 
     /** Invoice lines that bill the service itself (its price, and a promotion on it). */
     private const SERVICE_LINE_TYPES = ['Hosting', 'PromoHosting'];
