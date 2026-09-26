@@ -167,6 +167,9 @@ On the WHMCS running the Hub:
    products) enabled for that partner.
 4. For the provisioning run only: the partner's client must hold **enough credit**
    for one order.
+5. The code under test deployed: `scripts/deploy-dev.sh hub` (`all` for the connector too).
+   The `.test.sh` scripts upload only their own test files, so they test whatever the dev
+   WHMCS runs at the time.
 
 ## Running
 
