@@ -30,9 +30,8 @@ add_hook('ClientAreaPrimarySidebar', 100, function ($primarySidebar) {
 
         $isServiceActivated = $serviceData->domainstatus === 'Active';
 
-        $registrationTimestamp = strtotime($serviceData->regdate);
-        $oneMonthAgo = strtotime('-1 month');
-        $isRefundable = $registrationTimestamp > $oneMonthAgo;
+        // The Terms promise 30 days; regdate has no time, so the whole 30th day still counts.
+        $isRefundable = $serviceData->regdate >= date('Y-m-d', strtotime('-30 days'));
 
 
         if ($isServiceActivated){
