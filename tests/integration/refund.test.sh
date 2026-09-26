@@ -7,8 +7,11 @@
 #                     suspend/unsuspend/renew refused afterwards (terminate still runs)
 #   terminate-first   terminate, then refund: the module runs again and the price comes back
 #   suspended         a suspended key refunds; unsuspend is refused afterwards
-#   window            the default 7-day window, PartnerRefundDays = 10, and 0 (refunds off)
+#   window            the default 7-day window (6 days in, 8 out), PartnerRefundDays = 10, and 0
+#                     (refunds off)
 #   later-invoice     a key with a renewal invoice is refused
+#   ended-line        a renewal takes an ended key's line off a shared invoice before paying it,
+#                     and is refused when a payment is already on that invoice
 #   records           no purchase record, an unfinished purchase, an extra invoice line, a
 #                     refund booked by hand: each refused, then the restored order refunds
 #   concurrent        two refunds of one order at once: one credit
@@ -76,7 +79,7 @@ scenario() { echo "== $*"; remote "$ENV php $T $*"; }
 upload
 
 SCENARIOS=("$@")
-[ ${#SCENARIOS[@]} -eq 0 ] && SCENARIOS=(refund terminate-first suspended window later-invoice records concurrent lock timeout connector)
+[ ${#SCENARIOS[@]} -eq 0 ] && SCENARIOS=(refund terminate-first suspended window later-invoice ended-line records concurrent lock timeout connector)
 
 for s in "${SCENARIOS[@]}"; do
   case "$s" in

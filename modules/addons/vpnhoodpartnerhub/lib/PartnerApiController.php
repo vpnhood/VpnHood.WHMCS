@@ -36,9 +36,6 @@ class PartnerApiController
     /** Advertised in the X-Vpnhood-Hub-Features header of every response (api.php). */
     public const FEATURES = 'idempotency-v1';
 
-    /** A service in one of these has ended: its key was terminated (or refunded) and stays that way. */
-    private const ENDED_STATUSES = ['Terminated', 'Cancelled', 'Fraud'];
-
     private PartnerRepository $repo;
     private array $partner;
 
@@ -318,7 +315,8 @@ class PartnerApiController
      * it — it simply stays Unpaid and the partner's credit is never consumed. This
      * action pays it, which drives WHMCS's normal renewal path: nextduedate advances
      * one cycle and vpnhoodstore_Renew re-syncs the access-server token. If the partner
-     * never calls it, the token expires on the term end date and access stops.
+     * never calls it, the token expires on the term end date and access stops. Lines of keys
+     * that have ended come off the invoice first, so a renewal never pays for them.
      *
      * Services whose product is not Hub-mapped (one-time products, or anything created
      * outside the Hub) keep the original expiry re-sync behavior. An ended service is
@@ -466,7 +464,7 @@ class PartnerApiController
     {
         $service = $this->ownedServiceByOrder($orderId);
         $status = (string) $service->domainstatus;
-        if (in_array($status, self::ENDED_STATUSES, true)) {
+        if (in_array($status, PurchaseProcessor::ENDED_STATUSES, true)) {
             throw new ApiException(
                 "Order #{$orderId} is {$status}: an ended key cannot be {$actionPast}. Buy a new key instead.",
                 409,
