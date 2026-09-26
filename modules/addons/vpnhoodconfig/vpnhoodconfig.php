@@ -5,7 +5,7 @@ function vpnhoodconfig_config()
     return [
         'name'        => 'VpnHood! MANAGER Configuration',
         'description' => 'Global settings for VpnHood! MANAGER module',
-        'version'     => '1.2.10',
+        'version'     => '1.2.11',
         'author'      => 'VpnHood',
 
         'fields' => [
