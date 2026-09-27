@@ -150,7 +150,7 @@ for every new purchase. **Without a key, every call buys**, as it always has.
 | `refund_window_closed` | 409 | `refund` after the refund window, or with partner refunds turned off; nothing changed (`terminate` still ends the key, without returning credit) |
 | `not_refundable` | 409 | `refund` of an order the API does not refund (see *Refunds*); nothing changed — VpnHood refunds it by hand if it should be |
 | `refund_incomplete` | 409 | `refund` ended the key but could not return the credit; VpnHood support finishes it (quote the invoice) |
-| `renewal_blocked` | 409 | `renew` of a key whose renewal invoice also bills ended keys and already has a payment on it (`details.invoiceId`); nothing was paid — VpnHood support fixes the invoice |
+| `renewal_blocked` | 409 | `renew` of a key whose renewal invoice also bills ended keys, and either already has a payment on it or has nothing else left to pay (`details.invoiceId`); nothing was paid — VpnHood support fixes the invoice |
 
 `linkOrder` never buys: a Hub without it answers `404 Unknown action`. It binds the order you
 name — only a live, finished, keyless order of yours placed with the same product, billing
@@ -200,9 +200,10 @@ pays it — the partner's credit is never consumed. Nothing renews until the con
   advances the service one billing cycle and extends the access-server token.
 - A renewal never pays for an ended key. WHMCS puts one client's same-day renewals on one
   invoice, so `renew` first takes off the lines of keys that are Terminated, Cancelled or Fraud.
-  If a payment is already on that invoice, it answers `409 renewal_blocked` instead and pays
-  nothing.
-- `402` — not enough credit to cover the invoice; nothing changes.
+  If a payment is already on that invoice, or nothing else on it is left to pay, it answers
+  `409 renewal_blocked` instead and pays nothing.
+- `402` — not enough credit to cover the invoice; nothing is paid (the lines of ended keys may
+  already be off it).
 - `409` — no renewal invoice is outstanding yet. One exists once WHMCS has generated the
   upcoming renewal invoice (inside its Invoice Generation window before the due date).
 - If `renew` is never called, the token expires on the term end date and the end customer's

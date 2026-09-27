@@ -179,9 +179,9 @@ class PurchaseProcessor
 
     /**
      * WHMCS bills a client's same-day renewals on one invoice, so paying it for one key would also
-     * pay for keys the partner has already ended. Their lines come off first. Once anything is paid
-     * on the invoice, taking lines off could leave it overpaid, so the renewal is refused instead
-     * and the invoice is fixed by hand.
+     * pay for keys the partner has already ended. Their lines come off first. The renewal is refused
+     * instead, and the invoice fixed by hand, when taking them off would leave it overpaid (a payment
+     * is already on it) or at 0.00, which WHMCS keeps Unpaid, so it could never settle.
      *
      * @throws ApiException
      */
@@ -199,21 +199,22 @@ class PurchaseProcessor
         }
 
         $orders = implode(', ', array_unique(array_map(fn ($line) => '#' . $line->orderid, $lines)));
+        $lineIds = array_map(fn ($line) => (int) $line->id, $lines);
         $total = (float) Capsule::table('tblinvoices')->where('id', $invoiceId)->value('total');
-        if ($this->repo->invoiceBalance($invoiceId) + 0.005 < $total) {
+        $paid = $this->repo->invoiceBalance($invoiceId) + 0.005 < $total;
+        $left = (float) Capsule::table('tblinvoiceitems')->where('invoiceid', $invoiceId)->whereNotIn('id', $lineIds)->sum('amount');
+        if ($paid || $left < 0.005) {
+            $reason = $paid ? 'a payment is already on it' : 'nothing else on it is left to pay';
             throw new ApiException(
-                "Renewal invoice #{$invoiceId} also bills ended order(s) {$orders}, and a payment is already on it, so those"
-                . ' lines cannot be taken off here. Nothing was paid. Contact VpnHood support and quote the invoice.',
+                "Renewal invoice #{$invoiceId} also bills ended order(s) {$orders}, and {$reason}, so those lines cannot be"
+                . ' taken off here. Nothing was paid. Contact VpnHood support and quote the invoice.',
                 409,
                 'renewal_blocked',
                 ['invoiceId' => $invoiceId]
             );
         }
 
-        LocalApi::call('UpdateInvoice', [
-            'invoiceid'     => $invoiceId,
-            'deletelineids' => array_map(fn ($line) => (int) $line->id, $lines),
-        ]);
+        LocalApi::call('UpdateInvoice', ['invoiceid' => $invoiceId, 'deletelineids' => $lineIds]);
         logActivity("Partner Hub: took ended order(s) {$orders} off renewal invoice #{$invoiceId} before paying it from the"
             . " credit of client #{$clientId}.", $clientId);
     }

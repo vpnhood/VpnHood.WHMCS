@@ -415,10 +415,12 @@ and `renew` pays the invoice whole, so renewing one key paid for keys the partne
 ended. `settleInvoiceLocked` first takes the `Hosting`/`PromoHosting` lines of Terminated,
 Cancelled or Fraud services off the invoice (`UpdateInvoice` `deletelineids`, which
 recalculates the total) and logs it. It checks at payment time, not on termination, because a
-key can end in ways no hook sees (the status dropdown runs no module). Once anything is paid on
-the invoice, taking lines off could leave it overpaid, so `renew` is refused instead (`409
-renewal_blocked`) and the invoice is fixed by hand; with Automatic Credit Use off, only a
-payment made by hand gets there.
+key can end in ways no hook sees (the status dropdown runs no module). `renew` is refused
+instead (`409 renewal_blocked`), and the invoice fixed by hand, when taking the lines off would
+leave it overpaid (a payment is already on it; with Automatic Credit Use off, only a payment
+made by hand gets there) or at 0.00 (nothing else left to pay, as with a free key): WHMCS keeps
+a 0.00 invoice Unpaid, so it could never settle. The lines come off before the credit check, so
+a `402` renewal leaves them off too; they belong off either way.
 
 **Refunds** (`PurchaseProcessor::refundLocked`, rules in `RefundPolicy`):
 
@@ -459,6 +461,10 @@ Known limits, left as they are:
 - **Our admin and WHMCS's cron do not take the Hub's lock.** The lock serializes the API's own
   actions. A key they end while a renewal is between its line check and its payment is still
   paid for; a key ended before that check is not.
+- **Lines not tied to a key stay on a shared renewal invoice.** A manual line or a discount
+  carries no service id, so nothing tells which key it was meant for; taking an ended key's
+  lines off leaves it on the invoice for the others. Partner invoices carry only key lines
+  (no promotions, tax or group discount), so this has not come up.
 - **`AddCredit` is not atomic** with the balance update, the same as every order's
   `applyCredit`: the window is a crash between two SQL statements inside one WHMCS call.
 

@@ -8,8 +8,8 @@
  *
  * Writes outside the API are limited to what a scenario sets up, each undone in a finally: the
  * PartnerRefundDays setting, an invoice's payment date and a zero-price line (UpdateInvoice),
- * renewal invoices (GenInvoices; any left Unpaid is cancelled, one with 0.50 applied to it), one
- * refund ledger row, and the purchase record's state or order id.
+ * renewal invoices (GenInvoices; any left Unpaid is cancelled; one gets 0.50 applied, one a line
+ * set to 0.00), one refund ledger row, and the purchase record's state or order id.
  *
  * ⚠ Spends reseller and buyer (test) credit and provisions real tokens; every order it places
  * ends refunded or terminated.
@@ -276,6 +276,16 @@ function hasLine(int $invoiceId, int $serviceId): bool
         ->whereIn('type', ['Hosting', 'PromoHosting'])->exists();
 }
 
+function nextDue(int $serviceId): string
+{
+    return (string) Capsule::table('tblhosting')->where('id', $serviceId)->value('nextduedate');
+}
+
+function invoiceStatus(int $invoiceId): string
+{
+    return (string) Capsule::table('tblinvoices')->where('id', $invoiceId)->value('status');
+}
+
 function saveResult(string $name, array $r): void
 {
     @mkdir(RESULTS_DIR, 0700, true);
@@ -400,7 +410,7 @@ case 'later-invoice':
 
 // Renew never pays for an ended key. WHMCS bills same-day renewals on one invoice; renewing B
 // takes off the line of A, terminated meanwhile, before paying. With a payment already on the
-// invoice the renewal is refused instead, and nothing more is paid.
+// invoice, or nothing else on it left to pay, the renewal is refused instead and pays nothing.
 case 'ended-line':
     $made = $invoices = [];
     try {
@@ -412,26 +422,29 @@ case 'ended-line':
             ->where('relid', $b['serviceId'])->whereIn('type', ['Hosting', 'PromoHosting'])->sum('amount'), 2);
         expect(hub('terminate', ['upstreamOrderId' => $a['orderId']])['status'] === 200, 'A terminated through the Hub');
         expect(hasLine($invoiceId, $a['serviceId']), "A's line is still on invoice #$invoiceId after its termination");
-        $dueOfA = (string) Capsule::table('tblhosting')->where('id', $a['serviceId'])->value('nextduedate');
+        $dueOfA = nextDue($a['serviceId']);
+        $dueOfB = nextDue($b['serviceId']);
         $before = credit();
         $log = lastActivityId();
         $r = hub('renew', ['upstreamOrderId' => $b['orderId']]);
         expect($r['status'] === 200 && ($r['body']['data']['status'] ?? '') === 'renewed', 'B renewed', $r);
+        expect(strtotime(nextDue($b['serviceId'])) > strtotime($dueOfB), "B's due date moved on", [$dueOfB, nextDue($b['serviceId'])]);
         $invoice = Capsule::table('tblinvoices')->where('id', $invoiceId)->first(['status', 'total']);
         expect($invoice->status === 'Paid' && abs((float) $invoice->total - $linesOfB) < 0.001,
             "invoice #$invoiceId is Paid, for B's line alone ($linesOfB)", $invoice);
         expect(!hasLine($invoiceId, $a['serviceId']), "A's line is off the invoice");
         expect(abs($before - credit() - $linesOfB) < 0.001, "the credit paid B's line only", [$before, credit()]);
-        $dueNow = (string) Capsule::table('tblhosting')->where('id', $a['serviceId'])->value('nextduedate');
-        expect(status($a['serviceId']) === 'Terminated' && $dueNow === $dueOfA, 'A is still Terminated, its due date unchanged',
-            [status($a['serviceId']), $dueOfA, $dueNow]);
+        expect(status($a['serviceId']) === 'Terminated' && nextDue($a['serviceId']) === $dueOfA,
+            'A is still Terminated, its due date unchanged', [status($a['serviceId']), $dueOfA, nextDue($a['serviceId'])]);
         expect(activityLogged($log, "took ended order(s) #{$a['orderId']} off renewal invoice #$invoiceId"),
             'the activity log names the removal');
         // Nothing is invoiced for A any more, so its first purchase refunds inside the window.
         $paidForA = round((float) Capsule::table('tblinvoices')->where('id', $a['invoiceId'])->value('total'), 2);
+        $before = credit();
         $r = refund($a['orderId']);
         expect($r['status'] === 200 && ($r['body']['data']['status'] ?? '') === 'refunded'
-            && abs((float) ($r['body']['data']['amount'] ?? -1) - $paidForA) < 0.001, "A refunds its $paidForA", $r);
+            && abs((float) ($r['body']['data']['amount'] ?? -1) - $paidForA) < 0.001
+            && abs(credit() - $before - $paidForA) < 0.001, "A refunds its $paidForA to the credit", [$r, $before, credit()]);
 
         [$c, $d, $invoiceId] = sharedRenewal('ended-paid', $made, $invoices);
         if ($invoiceId === 0) {
@@ -443,12 +456,31 @@ case 'ended-line':
         $before = credit();
         expectRefused(hub('renew', ['upstreamOrderId' => $d['orderId']]), 'renewal_blocked', "#$invoiceId",
             'renew D with a payment already on the invoice');
-        expect(hasLine($invoiceId, $c['serviceId']) && Capsule::table('tblinvoices')->where('id', $invoiceId)->value('status') === 'Unpaid',
+        expect(hasLine($invoiceId, $c['serviceId']) && invoiceStatus($invoiceId) === 'Unpaid',
             "C's line stays and the invoice is still Unpaid");
         expect(abs(credit() - $before) < 0.001, 'nothing more was paid', credit());
+
+        // A free F: taking E's line off would leave 0.00, which WHMCS keeps Unpaid for good.
+        [$e, $f, $invoiceId] = sharedRenewal('ended-free', $made, $invoices);
+        if ($invoiceId === 0) {
+            break;
+        }
+        // WHMCS edits an existing line only with all three arrays; without itemtaxed it throws a TypeError.
+        $lineOfF = Capsule::table('tblinvoiceitems')->where('invoiceid', $invoiceId)->where('relid', $f['serviceId'])
+            ->where('type', 'Hosting')->first(['id', 'description', 'taxed']);
+        $u = localAPI('UpdateInvoice', ['invoiceid' => $invoiceId, 'itemdescription' => [$lineOfF->id => $lineOfF->description],
+            'itemamount' => [$lineOfF->id => 0], 'itemtaxed' => [$lineOfF->id => (bool) $lineOfF->taxed]]);
+        expect(($u['result'] ?? '') === 'success', "F's line on invoice #$invoiceId set to 0.00", $u);
+        expect(hub('terminate', ['upstreamOrderId' => $e['orderId']])['status'] === 200, 'E terminated through the Hub');
+        $before = credit();
+        expectRefused(hub('renew', ['upstreamOrderId' => $f['orderId']]), 'renewal_blocked', 'nothing else',
+            'renew F with nothing else left to pay');
+        expect(hasLine($invoiceId, $e['serviceId']) && invoiceStatus($invoiceId) === 'Unpaid',
+            "E's line stays and the invoice is still Unpaid");
+        expect(abs(credit() - $before) < 0.001, 'nothing was paid', credit());
     } finally {
         foreach (array_unique($invoices) as $id) {
-            if (Capsule::table('tblinvoices')->where('id', $id)->value('status') === 'Unpaid') {
+            if (invoiceStatus($id) === 'Unpaid') {
                 $x = localAPI('UpdateInvoice', ['invoiceid' => $id, 'status' => 'Cancelled']);
                 expect(($x['result'] ?? '') === 'success', "cleanup: renewal invoice #$id cancelled", $x);
             }
