@@ -134,7 +134,7 @@ scenarios press the Refund button through `ModuleCustom` on a buyer service.
 | `suspended` | a suspended key refunds; `unsuspend` is refused afterwards |
 | `window` | with the default 7 days, paid 6 days ago refunds; paid 8 days ago: `refund_window_closed`, nothing ended or returned; `PartnerRefundDays` = 10 refunds it; `0` refuses (refunds off) |
 | `later-invoice` | a key with a renewal invoice (`GenInvoices`, then cancelled) is `not_refundable` |
-| `ended-line` | two keys on one renewal invoice, one terminated: renewing the other takes the ended key's line off, pays only its own and moves its due date on; the ended key's due date stays and its purchase refunds to the credit. With 0.50 already paid on such an invoice, or the live key's line at 0.00 (nothing else left to pay), `renew` is `409 renewal_blocked` and pays nothing |
+| `ended-line` | two keys on one renewal invoice, one terminated: renewing the other takes the ended key's line off, pays only its own and moves its due date on; the ended key's due date stays and its purchase refunds to the credit. With 0.50 already paid on such an invoice, a manual discount line on it, or the live key's line at 0.00 (nothing else left to pay), `renew` is `409 renewal_blocked` and pays nothing; with no ended key on it, the manual line changes nothing and `renew` pays as before |
 | `records` | an unfinished purchase, no purchase record, an extra invoice line, a refund booked by hand: each `not_refundable` and changes nothing; restored, the order refunds |
 | `concurrent` | two refunds of one order at once: both `refunded`, one credit |
 | `lock` | an unsuspend and a refund queued behind the partner's credit lock (held by the test): whichever runs first, the key ends and the price returns once |
