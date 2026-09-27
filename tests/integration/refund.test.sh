@@ -11,8 +11,8 @@
 #                     (refunds off)
 #   later-invoice     a key with a renewal invoice is refused
 #   ended-line        a renewal takes an ended key's line off a shared invoice before paying it,
-#                     and is refused when a payment is already on that invoice or nothing else
-#                     on it is left to pay
+#                     and is refused when a payment is already on that invoice, a line on it is
+#                     not tied to a key, or nothing else on it is left to pay
 #   records           no purchase record, an unfinished purchase, an extra invoice line, a
 #                     refund booked by hand: each refused, then the restored order refunds
 #   concurrent        two refunds of one order at once: one credit

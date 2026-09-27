@@ -9,7 +9,8 @@
  * Writes outside the API are limited to what a scenario sets up, each undone in a finally: the
  * PartnerRefundDays setting, an invoice's payment date and a zero-price line (UpdateInvoice),
  * renewal invoices (GenInvoices; any left Unpaid is cancelled; one gets 0.50 applied, one a line
- * set to 0.00), one refund ledger row, and the purchase record's state or order id.
+ * set to 0.00, one a manual discount line), one refund ledger row, and the purchase record's
+ * state or order id.
  *
  * ⚠ Spends reseller and buyer (test) credit and provisions real tokens; every order it places
  * ends refunded or terminated.
@@ -410,7 +411,8 @@ case 'later-invoice':
 
 // Renew never pays for an ended key. WHMCS bills same-day renewals on one invoice; renewing B
 // takes off the line of A, terminated meanwhile, before paying. With a payment already on the
-// invoice, or nothing else on it left to pay, the renewal is refused instead and pays nothing.
+// invoice, a line on it not tied to a key, or nothing else on it left to pay, the renewal is
+// refused instead and pays nothing.
 case 'ended-line':
     $made = $invoices = [];
     try {
@@ -478,6 +480,36 @@ case 'ended-line':
         expect(hasLine($invoiceId, $e['serviceId']) && invoiceStatus($invoiceId) === 'Unpaid',
             "E's line stays and the invoice is still Unpaid");
         expect(abs(credit() - $before) < 0.001, 'nothing was paid', credit());
+
+        // A discount typed in by hand names no key, so it may have been meant for the ended G.
+        [$g, $h, $invoiceId] = sharedRenewal('ended-manual', $made, $invoices);
+        if ($invoiceId === 0) {
+            break;
+        }
+        $u = localAPI('UpdateInvoice', ['invoiceid' => $invoiceId, 'newitemdescription' => ['vhtest discount'],
+            'newitemamount' => [-0.5], 'newitemtaxed' => [false]]);
+        expect(($u['result'] ?? '') === 'success', "a manual discount line added to invoice #$invoiceId", $u);
+        expect(hub('terminate', ['upstreamOrderId' => $g['orderId']])['status'] === 200, 'G terminated through the Hub');
+        $before = credit();
+        expectRefused(hub('renew', ['upstreamOrderId' => $h['orderId']]), 'renewal_blocked', 'not tied to a key',
+            'renew H with a manual line on the invoice');
+        expect(hasLine($invoiceId, $g['serviceId']) && invoiceStatus($invoiceId) === 'Unpaid',
+            "G's line stays and the invoice is still Unpaid");
+        expect(abs(credit() - $before) < 0.001, 'nothing was paid', credit());
+
+        // With no ended key on it, the same manual line changes nothing: the renewal pays as before.
+        [$i, $j, $invoiceId] = sharedRenewal('live-manual', $made, $invoices);
+        if ($invoiceId === 0) {
+            break;
+        }
+        $u = localAPI('UpdateInvoice', ['invoiceid' => $invoiceId, 'newitemdescription' => ['vhtest discount'],
+            'newitemamount' => [-0.5], 'newitemtaxed' => [false]]);
+        expect(($u['result'] ?? '') === 'success', "a manual discount line added to invoice #$invoiceId", $u);
+        $dueOfJ = nextDue($j['serviceId']);
+        $r = hub('renew', ['upstreamOrderId' => $j['orderId']]);
+        expect($r['status'] === 200 && ($r['body']['data']['status'] ?? '') === 'renewed'
+            && invoiceStatus($invoiceId) === 'Paid' && strtotime(nextDue($j['serviceId'])) > strtotime($dueOfJ),
+            "J renews, invoice #$invoiceId Paid, with no ended key on it", [$r, invoiceStatus($invoiceId)]);
     } finally {
         foreach (array_unique($invoices) as $id) {
             if (invoiceStatus($id) === 'Unpaid') {

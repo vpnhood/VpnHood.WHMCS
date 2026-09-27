@@ -179,9 +179,8 @@ class PurchaseProcessor
 
     /**
      * WHMCS bills a client's same-day renewals on one invoice, so paying it for one key would also
-     * pay for keys the partner has already ended. Their lines come off first. The renewal is refused
-     * instead, and the invoice fixed by hand, when taking them off would leave it overpaid (a payment
-     * is already on it) or at 0.00, which WHMCS keeps Unpaid, so it could never settle.
+     * pay for keys the partner has already ended. Their lines come off first, or, where that is not
+     * safe, the renewal is refused and the invoice fixed by hand.
      *
      * @throws ApiException
      */
@@ -200,14 +199,11 @@ class PurchaseProcessor
 
         $orders = implode(', ', array_unique(array_map(fn ($line) => '#' . $line->orderid, $lines)));
         $lineIds = array_map(fn ($line) => (int) $line->id, $lines);
-        $total = (float) Capsule::table('tblinvoices')->where('id', $invoiceId)->value('total');
-        $paid = $this->repo->invoiceBalance($invoiceId) + 0.005 < $total;
-        $left = (float) Capsule::table('tblinvoiceitems')->where('invoiceid', $invoiceId)->whereNotIn('id', $lineIds)->sum('amount');
-        if ($paid || $left < 0.005) {
-            $reason = $paid ? 'a payment is already on it' : 'nothing else on it is left to pay';
+        $reason = $this->endedLinesBlocked($invoiceId, $lineIds);
+        if ($reason !== null) {
             throw new ApiException(
-                "Renewal invoice #{$invoiceId} also bills ended order(s) {$orders}, and {$reason}, so those lines cannot be"
-                . ' taken off here. Nothing was paid. Contact VpnHood support and quote the invoice.',
+                "Renewal invoice #{$invoiceId} also bills ended order(s) {$orders}, which cannot be taken off it here: {$reason}."
+                . ' Nothing was paid. Contact VpnHood support and quote the invoice.',
                 409,
                 'renewal_blocked',
                 ['invoiceId' => $invoiceId]
@@ -217,6 +213,23 @@ class PurchaseProcessor
         LocalApi::call('UpdateInvoice', ['invoiceid' => $invoiceId, 'deletelineids' => $lineIds]);
         logActivity("Partner Hub: took ended order(s) {$orders} off renewal invoice #{$invoiceId} before paying it from the"
             . " credit of client #{$clientId}.", $clientId);
+    }
+
+    /** Why the ended keys' lines cannot safely come off this invoice, or null when they can. */
+    private function endedLinesBlocked(int $invoiceId, array $lineIds): ?string
+    {
+        $total = (float) Capsule::table('tblinvoices')->where('id', $invoiceId)->value('total');
+        if ($this->repo->invoiceBalance($invoiceId) + 0.005 < $total) {
+            return 'a payment is already on it'; // taking lines off could leave it overpaid
+        }
+        $others = Capsule::table('tblinvoiceitems')->where('invoiceid', $invoiceId)->whereNotIn('id', $lineIds);
+        if ((clone $others)->whereNotIn('type', RefundPolicy::SERVICE_LINE_TYPES)->exists()) {
+            return 'it has lines not tied to a key'; // a manual line or discount may have been meant for an ended key
+        }
+        if ((float) $others->sum('amount') < 0.005) {
+            return 'nothing else on it is left to pay'; // WHMCS keeps a 0.00 invoice Unpaid, so it could never settle
+        }
+        return null;
     }
 
     /**
