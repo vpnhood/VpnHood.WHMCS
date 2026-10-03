@@ -11,10 +11,11 @@
  *
  * `held-client` creates what the checkout hold leaves behind — a fresh
  * unconfirmed client (e2e-verify-*@vpnhood.test, password E2E_CLIENT_PASSWORD)
- * with one unpaid paymenthood order — and prints its ids; `drop-verify-clients`
+ * with one unpaid paymenthood order — and prints its ids; `verify-token <email>` prints
+ * the address-confirmation token WHMCS mailed a new user; `drop-verify-clients`
  * removes every such client together with its orders and invoices.
  *
- * Usage: E2E_CLIENT_PASSWORD=… php e2e-state.php <clean|onetime-key|renewing|bulk|held-client|drop-verify-clients>
+ * Usage: E2E_CLIENT_PASSWORD=… php e2e-state.php <clean|onetime-key|renewing|bulk|held-client|verify-token <email>|drop-verify-clients>
  */
 
 require '/home/whmcsdev/web/whmcs-dev.vpnhood.com/public_html/init.php';
@@ -211,6 +212,15 @@ switch ($scenario) {
             'orderId'   => (int) $add['orderid'],
             'invoiceId' => (int) ($add['invoiceid'] ?? 0),
         ]) . "\n";
+        break;
+    case 'verify-token':
+        // the token of the link WHMCS mails a new user (index.php?rp=/user/verify/<token>)
+        $email = $argv[2] ?? '';
+        $user = Capsule::table('tblusers')->where('email', $email)->first(['id', 'email_verification_token']);
+        if ($user === null || (string) $user->email_verification_token === '') {
+            fail("no pending address confirmation for '$email'");
+        }
+        echo json_encode(['userId' => (int) $user->id, 'token' => (string) $user->email_verification_token]) . "\n";
         break;
     case 'drop-verify-clients':
         // DeleteClient takes the orders, invoices and (unprovisioned) services with it;

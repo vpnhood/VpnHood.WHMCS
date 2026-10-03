@@ -7,10 +7,12 @@ Playwright-driven scripts against `https://whmcs-dev.vpnhood.com`. Two kinds liv
   confirms (they never click Save themselves).
 - **Automated e2e tests** (`*.spec.mjs`, run through `run-e2e.sh`) — the checkout
   warning (`cart-notice`), reseller CSV delivery (`reseller-csv`), and the email
-  verification checkout hold (`verify-checkout`: a held client — fresh, unconfirmed,
-  one unpaid order, created by the state driver — signs in and finds the confirmation
-  page naming the waiting invoice, with the invoice itself gated). The hook that does
-  the holding is covered by `tests/integration/verify-checkout.test.sh`.
+  verification checkout hold, twice: `verify-checkout` (a held client — fresh,
+  unconfirmed, one unpaid order, created by the state driver — signs in and finds the
+  confirmation page naming the waiting invoice, with the invoice itself gated) and
+  `verify-checkout-cart` (a new customer registers at checkout through the real cart, is
+  held, confirms the address through the mailed link and finds the invoice open). The
+  hook that does the holding is covered by `tests/integration/verify-checkout.test.sh`.
 
   A cart test must order a product whose group leaves at least one payment method, since
   WHMCS refuses an order whose product group disables every gateway.

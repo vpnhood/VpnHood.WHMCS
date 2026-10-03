@@ -112,7 +112,7 @@ that bounced every page would make recovery impossible.
 
 ## Verification (no local test tooling — use the dev WHMCS)
 
-The checkout hold has two automated checks (deploy first with `scripts/deploy-dev.sh hub`):
+The checkout hold has three automated checks (deploy first with `scripts/deploy-dev.sh hub`):
 
 - `tests/integration/verify-checkout.test.sh` — fires `AfterShoppingCartCheckout` through
   WHMCS's `run_hook()` for a fresh unconfirmed client with an unpaid order (held) and again
@@ -121,8 +121,11 @@ The checkout hold has two automated checks (deploy first with `scripts/deploy-de
 - `tests/e2e/run-e2e.sh verify-checkout.spec.mjs` — the held client's side: signs in,
   sees the confirmation page name the waiting invoice (and ignore anyone else's), and
   cannot open the invoice itself until confirmed.
+- `tests/e2e/run-e2e.sh verify-checkout-cart.spec.mjs` — the same hold through the real cart:
+  a new customer registers at checkout, is held at the confirmation page, confirms the
+  address through the mailed link and finds the invoice open.
 
-Neither drives the real cart form; step 7 below is the manual check.
+Paying that invoice happens on the gateway's own page; step 7 below covers it by hand.
 
 For the rest, deploy with `scripts/deploy-dev.sh hub`, then at `https://whmcs-dev.vpnhood.com`:
 
