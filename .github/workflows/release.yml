@@ -277,7 +277,6 @@ jobs:
             modules/addons/vpnhoodconfig/vpnhoodconfig.php \
             modules/addons/vpnhoodpartnerhub/vpnhoodpartnerhub.php \
             modules/addons/vpnhoodpartnerhub/api.php \
-            includes/hooks/vpnhoodcustomhook.php \
             includes/hooks/vpnhoodstore-restrict-user-group-products.php \
             modules/addons/vpnhoodiap/vpnhoodiap.php \
             modules/addons/vpnhoodiap/api.php \
