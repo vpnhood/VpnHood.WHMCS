@@ -38,7 +38,7 @@
 
 require __DIR__ . '/lib/common.php';
 
-const UPSTREAM_PRICE = 2.00;
+const UPSTREAM_PRICE = 1.75;
 
 $buyer = clientByEmail($db, BUYER_EMAIL);
 $reseller = clientByEmail($db, RESELLER_EMAIL);

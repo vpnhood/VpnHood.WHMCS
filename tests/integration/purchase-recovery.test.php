@@ -37,7 +37,7 @@ use WHMCS\Module\Addon\VpnHoodPartnerHub\PurchaseRepository;
 const REF_ONETIME   = 'reseller-one-month-premium-code';
 const REF_RECURRING = 'reseller-one-month-premium-code-subscription';
 const REF_CSV       = 'reseller-bulk-csv-premium-code';
-const PRICE         = 2.00;
+const PRICE         = 1.75;
 const RESULTS_DIR   = '/home/whmcsdev/tmp/vhrt';
 const FAIL_FLAG     = '/home/whmcsdev/tmp/vhtest-rollback-interference';
 

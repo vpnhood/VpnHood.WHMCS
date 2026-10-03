@@ -17,7 +17,7 @@ require __DIR__ . '/lib/common.php';
 use WHMCS\Database\Capsule;
 
 const CONNECTOR_SLUG = 'partner-one-month-premium-code';
-const HUB_PRICE      = 2.00;
+const HUB_PRICE      = 1.75;
 const RESULTS_DIR    = '/home/whmcsdev/tmp/vhci';
 
 $buyer = clientByEmail($db, BUYER_EMAIL);

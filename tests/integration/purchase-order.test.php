@@ -34,7 +34,7 @@ const CONNECTOR_SLUG_ONETIME    = 'partner-one-month-premium-code';
 const CONNECTOR_SLUG_RECURRING  = 'partner-one-month-premium-code-subscription';
 const UPSTREAM_SLUG_ONETIME     = 'reseller-one-month-premium-code';
 const UPSTREAM_SLUG_RECURRING   = 'reseller-one-month-premium-code-subscription';
-const UPSTREAM_PRICE            = 2.00;
+const UPSTREAM_PRICE            = 1.75;
 
 $productType = getenv('PRODUCT_TYPE') ?: '';
 if (!in_array($productType, ['onetime', 'recurring'], true)) {

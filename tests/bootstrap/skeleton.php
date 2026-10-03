@@ -191,8 +191,14 @@ function applySpec(PDO $db, array $spec, array &$report): void {
         }
         $report['ids']['product:' . $p['slug']] = $pid;
 
-        // pricing (currency 1 = USD; onetime products keep their price in `monthly`)
-        if (!one($db, "SELECT id FROM tblpricing WHERE type='product' AND currency=1 AND relid=?", [$pid])) {
+        // pricing (currency 1 = USD; onetime products keep their price in `monthly`); an existing
+        // product follows the fixture's price too, so a price change here reaches the dev box
+        $pricing = one($db, "SELECT id, monthly FROM tblpricing WHERE type='product' AND currency=1 AND relid=?", [$pid]);
+        if ($pricing && (float)$pricing['monthly'] !== (float)$p['price']) {
+            $db->prepare('UPDATE tblpricing SET monthly=? WHERE id=?')->execute([$p['price'], $pricing['id']]);
+            $report['updated'][] = "price of '{$p['slug']}' → {$p['price']} USD";
+        }
+        if (!$pricing) {
             insertRow($db, 'tblpricing', [
                 'type' => 'product', 'currency' => 1, 'relid' => $pid,
                 'monthly' => $p['price'],

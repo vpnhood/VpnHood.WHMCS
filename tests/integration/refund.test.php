@@ -32,7 +32,7 @@ use WHMCS\Module\Server\VpnHoodStore\ApiService;
 const REF_ONETIME    = 'reseller-one-month-premium-code';
 const REF_RECURRING  = 'reseller-one-month-premium-code-subscription';
 const CONNECTOR_SLUG = 'partner-one-month-premium-code';
-const PRICE          = 2.00;
+const PRICE          = 1.75;
 const RESULTS_DIR    = '/home/whmcsdev/tmp/vhrf';
 
 $reseller = clientByEmail($db, RESELLER_EMAIL);

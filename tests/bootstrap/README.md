@@ -14,8 +14,8 @@ What it ensures (spec: [fixtures.json](fixtures.json), applied server-side by
 | --- | --- |
 | Hub addon | **vpnhoodpartnerhub** activated + configured (Full Administrator access, IP allowlist off, gateway `banktransfer`); `mod_vpnhood_*` tables recreated if dropped |
 | Product group | **VpnHood! CONNECT Reseller** (`vpnhood-connect-for-reseller`) |
-| Product (onetime, $2.00) | **Reseller - One-Month Premium Code** (`reseller-one-month-premium-code`) |
-| Product (recurring, $2.00/mo) | **Reseller - One-Month Premium Code (Subscription)** (`…-subscription`) |
+| Product (onetime, $1.75) | **Reseller - One-Month Premium Code** (`reseller-one-month-premium-code`) |
+| Product (recurring, $1.75/mo) | **Reseller - One-Month Premium Code (Subscription)** (`…-subscription`) |
 | Reseller client | **`test-reseller@vpnhood.com`** ("Test Reseller") — credit topped up to **$500** |
 | Hub partner | **Test Reseller**, linked to the reseller client, both products mapped (`downstream_ref` = product slug) |
 

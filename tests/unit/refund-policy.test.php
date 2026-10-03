@@ -31,7 +31,7 @@ function check(bool $condition, string $message, $detail = null): void
     echo "FAIL $message" . ($detail !== null ? ' — ' . json_encode($detail) : '') . "\n";
 }
 
-/** A refundable order: bought through the Hub, paid 2.00 on PAID, one line for its service. */
+/** A refundable order: bought through the Hub, paid 1.75 on PAID, one line for its service. */
 function facts(array $purchase = [], array $invoice = [], array $other = []): array
 {
     return array_replace([
@@ -39,7 +39,7 @@ function facts(array $purchase = [], array $invoice = [], array $other = []): ar
         'serviceId'       => 1874,
         'partnerClientId' => 22,
         'purchase'        => array_replace(['state' => 'delivered', 'clientId' => 22, 'serviceId' => 1874, 'invoiceId' => 1852], $purchase),
-        'invoice'         => array_replace(['userId' => 22, 'status' => 'Paid', 'total' => 2.0, 'datePaid' => PAID], $invoice),
+        'invoice'         => array_replace(['userId' => 22, 'status' => 'Paid', 'total' => 1.75, 'datePaid' => PAID], $invoice),
         'items'           => [['type' => 'Hosting', 'relid' => 1874]],
         'refundBooked'    => false,
         'laterInvoiceIds' => [],
