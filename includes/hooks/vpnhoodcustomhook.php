@@ -19,7 +19,8 @@ add_hook('ClientAreaPrimarySidebar', 100, function ($primarySidebar) {
     }
 
 
-    $serviceId = (int)$_REQUEST['id'];
+    // Every sidebar page runs this, most without an id; a PHP warning here turns the page into a 500.
+    $serviceId = (int)($_REQUEST['id'] ?? 0);
 
     if ($serviceId > 0 && !is_null($primarySidebar->getChild('Service Details Actions'))) {
 
@@ -27,6 +28,9 @@ add_hook('ClientAreaPrimarySidebar', 100, function ($primarySidebar) {
             ->where('id', $serviceId)
             ->select('domainstatus', 'regdate')
             ->first();
+        if ($serviceData === null) {
+            return;
+        }
 
         $isServiceActivated = $serviceData->domainstatus === 'Active';
 
@@ -80,7 +84,7 @@ add_hook('ClientAreaSecondarySidebar', 100, function ($secondarySidebar) {
 add_hook('ClientDetailsValidation', 100, function($vars) {
     $errors = [];
     $fieldId = 6; // Replace with the actual ID of your custom field
-    if ($vars['customfield'][$fieldId] === "-- Please choose --")
+    if (($vars['customfield'][$fieldId] ?? null) === "-- Please choose --")
         $errors[] = 'Please select an option for "How did you hear about us?".';
 
     return $errors;
