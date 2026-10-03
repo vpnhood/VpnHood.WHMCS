@@ -122,10 +122,7 @@ The checkout hold has two automated checks (deploy first with `scripts/deploy-de
   sees the confirmation page name the waiting invoice (and ignore anyone else's), and
   cannot open the invoice itself until confirmed.
 
-Neither drives the real cart form: the dev install currently rejects every
-register-at-checkout POST with *No payment gateways available* (reproduced with every
-VpnHood hook disabled — a dev gateway-config problem). Until that is fixed, step 7 below is
-the manual check.
+Neither drives the real cart form; step 7 below is the manual check.
 
 For the rest, deploy with `scripts/deploy-dev.sh hub`, then at `https://whmcs-dev.vpnhood.com`:
 
@@ -138,6 +135,7 @@ For the rest, deploy with `scripts/deploy-dev.sh hub`, then at `https://whmcs-de
    opens the portal. Confirm `tblusers.email_verified_at` is now set.
 5. Switch to **Every client** → the existing test client is gated too; verifying opens it.
 6. Confirm admin login and `modules/addons/vpnhoodpartnerhub/api.php` are unaffected.
-7. Register a fresh client *at checkout* (new-customer form on the cart) → the confirmation
-   page opens instead of the gateway, saying the order is saved and unpaid. Confirm the
-   address → the page links to the invoice, and paying it provisions as usual.
+7. Register a fresh client *at checkout* (new-customer form on the cart, with a product whose
+   group offers a payment method) → the confirmation page opens instead of the gateway, saying
+   the order is saved and unpaid. Confirm the address → the page links to the invoice; pay
+   it and it provisions as usual.

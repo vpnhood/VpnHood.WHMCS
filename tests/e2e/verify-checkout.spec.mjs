@@ -6,11 +6,6 @@
 //
 // Requires the dev addon active with Enforce Verification = Yes and
 // Applies To = New clients only (the held client is created today).
-//
-// Why not drive the real cart: the dev install currently rejects every
-// register-at-checkout POST with "No payment gateways available" (reproduced
-// with every VpnHood hook disabled — a dev gateway-config problem, not code),
-// so the client and order come from the state driver instead.
 import { test, expect } from '@playwright/test';
 import { setState } from './lib/state.mjs';
 

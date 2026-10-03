@@ -12,9 +12,8 @@ Playwright-driven scripts against `https://whmcs-dev.vpnhood.com`. Two kinds liv
   page naming the waiting invoice, with the invoice itself gated). The hook that does
   the holding is covered by `tests/integration/verify-checkout.test.sh`.
 
-  Known dev limitation: the dev install rejects every register-at-checkout POST with
-  *No payment gateways available* (reproduced with all VpnHood hooks disabled), so no
-  spec drives the real cart form to completion.
+  A cart test must order a product whose group leaves at least one payment method, since
+  WHMCS refuses an order whose product group disables every gateway.
 
 ## Setup
 
