@@ -46,6 +46,7 @@ case "${SSH_HOST:-}" in *whmcsdev@*) ;; "") ;; *) echo "!! REFUSED: only whmcsde
 [ -f "$SSH_KEY" ] || { echo "SSH key not found: $SSH_KEY" >&2; exit 1; }
 SSH=(ssh -i "$SSH_KEY" -o BatchMode=yes -o ConnectTimeout=15 -o ServerAliveInterval=15 -o ServerAliveCountMax=4 "$SSH_HOST")
 export WHMCS_DEV_SSH_KEY="$SSH_KEY" WHMCS_DEV_SSH_HOST="$SSH_HOST"
+. "$SCRIPT_DIR/lib/old-hub-hooks.sh"
 
 TMP="$(mktemp -d)"
 T='~/tmp/connector-idempotency.test.php'
@@ -54,7 +55,7 @@ FAILED=0
 deployed() { "$@" > "$TMP/deploy.log" 2>&1 || { cat "$TMP/deploy.log" >&2; echo "!! deploy failed" >&2; exit 1; }; }
 deploy_current() {
   echo "-- deploying the working tree ($1)"
-  if [ "$1" = hub ]; then deployed "$REPO_ROOT/scripts/deploy-dev.sh" hub; else deployed env PARTNER_REPO="$PARTNER_REPO" "$REPO_ROOT/scripts/deploy-dev.sh" partner; fi
+  if [ "$1" = hub ]; then deployed "$REPO_ROOT/scripts/deploy-dev.sh" hub; put_back_old_only_hooks; else deployed env PARTNER_REPO="$PARTNER_REPO" "$REPO_ROOT/scripts/deploy-dev.sh" partner; fi
 }
 deploy_old_connector() {
   echo "-- deploying the connector release $OLD_CONNECTOR"
@@ -66,12 +67,14 @@ deploy_old_hub() {
   echo "-- deploying the Hub release $OLD_HUB"
   mkdir -p "$TMP/hub-$OLD_HUB"
   git -C "$REPO_ROOT" archive "$OLD_HUB" | tar -x -C "$TMP/hub-$OLD_HUB"
+  keep_old_only_hooks "$TMP/hub-$OLD_HUB"
   deployed "$TMP/hub-$OLD_HUB/scripts/deploy-dev.sh" hub
 }
 
 restore() {
   echo "== restoring the working tree of both repos on dev"
   "$REPO_ROOT/scripts/deploy-dev.sh" hub > "$TMP/restore.log" 2>&1 || { cat "$TMP/restore.log" >&2; FAILED=1; }
+  put_back_old_only_hooks || FAILED=1
   PARTNER_REPO="$PARTNER_REPO" "$REPO_ROOT/scripts/deploy-dev.sh" partner >> "$TMP/restore.log" 2>&1 || { cat "$TMP/restore.log" >&2; FAILED=1; }
   "${SSH[@]}" "rm -rf ~/tmp/connector-idempotency.test.php ~/tmp/vhci" || true
   rm -rf "$TMP"

@@ -50,6 +50,7 @@ case "${SSH_HOST:-}" in *whmcsdev@*) ;; "") ;; *) echo "!! REFUSED: only whmcsde
 [ -f "$SSH_KEY" ] || { echo "SSH key not found: $SSH_KEY" >&2; exit 1; }
 SSH=(ssh -i "$SSH_KEY" -o BatchMode=yes -o ConnectTimeout=15 -o ServerAliveInterval=15 -o ServerAliveCountMax=4 "$SSH_HOST")
 export WHMCS_DEV_SSH_KEY="$SSH_KEY" WHMCS_DEV_SSH_HOST="$SSH_HOST"
+. "$SCRIPT_DIR/lib/old-hub-hooks.sh"
 
 RUN="$(date +%s)"
 ENV="RUN=$RUN HUB_URL=$(printf %q "$HUB_URL") HUB_KEY=$(printf %q "$HUB_KEY") HUB_SECRET=$(printf %q "$HUB_SECRET")"
@@ -62,6 +63,7 @@ cleanup() {
   if [ "$OLD_HUB_DEPLOYED" = "1" ]; then
     echo "== restoring the working tree of the Hub on dev"
     "$REPO_ROOT/scripts/deploy-dev.sh" hub > "$TMP/restore.log" 2>&1 || { cat "$TMP/restore.log" >&2; FAILED=1; }
+    put_back_old_only_hooks || FAILED=1
   fi
   "${SSH[@]}" "rm -rf ~/tmp/refund.test.php ~/tmp/lib ~/tmp/vhrf" || true
   rm -rf "$TMP"
@@ -108,11 +110,13 @@ for s in "${SCENARIOS[@]}"; do
       echo "-- deploying the Hub release $OLD_HUB"
       mkdir -p "$TMP/hub-$OLD_HUB"
       git -C "$REPO_ROOT" archive "$OLD_HUB" | tar -x -C "$TMP/hub-$OLD_HUB"
+      keep_old_only_hooks "$TMP/hub-$OLD_HUB"
       OLD_HUB_DEPLOYED=1
       deployed "$TMP/hub-$OLD_HUB/scripts/deploy-dev.sh" hub
       scenario connector-old-hub
       echo "-- deploying the working tree (hub)"
       deployed "$REPO_ROOT/scripts/deploy-dev.sh" hub
+      put_back_old_only_hooks
       OLD_HUB_DEPLOYED=0
       upload
       scenario connector-old-hub-cleanup
