@@ -29,6 +29,8 @@
 # Env overrides: WHMCS_DEV_SSH_KEY, WHMCS_DEV_SSH_HOST, PARTNER_REPO, OLD_CONNECTOR, OLD_HUB.
 
 set -euo pipefail
+# mktemp under one scratch folder, so a killed run's leftovers land there too
+export TMPDIR="${TMPDIR:-/tmp}/vh"; mkdir -p "$TMPDIR"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"

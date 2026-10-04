@@ -32,6 +32,8 @@
 # HUB_SECRET come from tests/integration/.env (written by tests/bootstrap/init-skeleton.sh).
 
 set -euo pipefail
+# mktemp under one scratch folder, so a killed run's leftovers land there too
+export TMPDIR="${TMPDIR:-/tmp}/vh"; mkdir -p "$TMPDIR"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"

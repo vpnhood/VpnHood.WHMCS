@@ -42,6 +42,8 @@
 # Exit code is non-zero if any assertion fails.
 #
 set -u
+# mktemp under one scratch folder, so a killed run's leftovers land there too
+export TMPDIR="${TMPDIR:-/tmp}/vh"; mkdir -p "$TMPDIR"
 
 DIR="$(cd "$(dirname "$0")" && pwd)"
 if [ -f "$DIR/.env" ]; then set -a; . "$DIR/.env"; set +a; fi
