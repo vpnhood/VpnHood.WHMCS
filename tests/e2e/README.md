@@ -38,6 +38,7 @@ Env overrides: `WHMCS_ADMIN_USER`, `WHMCS_ADMIN_PASSWORD`, `WHMCS_DEV_URL`.
 | Command | What it does |
 | --- | --- |
 | `npm run hub:configure` | Log in → Addon Modules → activate **VpnHood! Partner Hub** if needed → open Configure → uncheck *Require IP Allowlist*, fill *Order Payment Gateway* (`HUB_ORDER_GATEWAY`, default `banktransfer`), check *Full Administrator* → **waits without saving**; after you click *Save Changes* it asserts the WHMCS **“Changes Saved Successfully”** banner and prints PASS. |
+| `node admin-page-load.mjs <server>` | After a deploy, against any install whose `"adminUrl"` is in `<Vh root>/.user/<server>/secrets.json` (or `secrets.txt`): opens the admin login for you to sign in, then loads **Addon Modules** (WHMCS runs an addon's upgrade only on an admin page load) and the dashboard, saves a picture of the addon list in the temp folder and closes. |
 
 **Pass criterion for admin saves:** WHMCS shows a “Changes Saved Successfully”
 banner at the top of the page after a successful save — assert that banner in
