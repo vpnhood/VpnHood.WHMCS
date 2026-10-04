@@ -1,4 +1,6 @@
 import { defineConfig } from '@playwright/test';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 
 const baseURL = process.env.WHMCS_DEV_URL ?? 'https://whmcs-dev.vpnhood.com';
 
@@ -9,6 +11,8 @@ if (baseURL.includes('account.vpnhood.com') || !baseURL.includes('whmcs-dev')) {
 
 export default defineConfig({
   testDir: '.',
+  // failure screenshots, traces and Playwright's run state go to the temp folder, not the repo
+  outputDir: join(tmpdir(), 'vh', 'whmcs-e2e'),
   timeout: 90_000,
   workers: 1, // the specs share one WHMCS client's state — strictly serial
   retries: 0,
