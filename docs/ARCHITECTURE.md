@@ -459,7 +459,7 @@ off either way.
   answers `refunded` with its amount. Marking the invoice Refunded was rejected: a crash
   between the status change and the credit would report a refund nobody received, and the
   status change fires the InvoiceRefunded hooks (the refund-terminate hook, and
-  `vpnhood-refund-memory.php`, which would fingerprint the partner). If `AddCredit` fails after
+  `vpnhood-refund-memory.php`, which would remember the partner's address as refunded). If `AddCredit` fails after
   the key ended: `409 refund_incomplete` and an activity-log line saying to add the credit by
   hand **with that description**, which is what marks it done.
 - **No feature flag.** A Hub without `refund` answers `404 Unknown action` and changes nothing,

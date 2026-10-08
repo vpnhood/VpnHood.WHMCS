@@ -18,8 +18,10 @@
  *
  * The hash is the sha256 of the folded address (vpnhood_refund_memory_hash): it can answer
  * "refunded before?" but cannot be turned back into the address, and it survives the
- * client's deletion, which is its point. The hook functions are named, not closures, so
- * tests/integration/refund-memory.test.php can drive them without a refund of its own.
+ * client's deletion, which is its point. It is unkeyed on purpose: a key would be one more
+ * secret to keep and would protect little, since the same database holds the addresses. The
+ * hook functions are named, not closures, so tests/integration/refund-memory.test.php can
+ * drive them without a refund of its own.
  */
 
 if (!defined('WHMCS')) {
