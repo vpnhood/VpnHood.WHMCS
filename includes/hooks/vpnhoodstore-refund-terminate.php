@@ -18,11 +18,9 @@
  *    It is logged with the services it left running — silence would be its own
  *    accident, and the merchant can still revoke by hand.
  *
- * "In full" is two signals, either of which is enough: WHMCS has marked the invoice
- * Refunded, or the refunds booked against it add up to its total (several partial
- * refunds that reach the total ARE a full refund). Two, because WHMCS's core is
- * encoded — nothing here can read when it fires this hook or how it decides to
- * stamp the status, so the hook must be right under both behaviours.
+ * "In full" is vpnhoodstore_isRefundedInFull: WHMCS has marked the invoice Refunded,
+ * or the refunds booked against it add up to its total. The refund memory
+ * (vpnhood-refund-memory.php) judges by the same function.
  *
  * Store-channel (IAP) refunds go through their own pipeline, which terminates
  * before this hook sees the invoice — the not-Active guard makes the two
@@ -55,6 +53,27 @@ function vpnhoodstore_refundedTotal(int $invoiceId): float
         })
         ->sum('amountout');
     return round((float) $refunds, 2);
+}
+
+/**
+ * Whether the WHOLE sale is being undone. Two independent signals, either one enough,
+ * because WHMCS's core is encoded — nothing here can read when it fires InvoiceRefunded
+ * or how it decides to stamp the status, so the judgement must be right under both
+ * behaviours: WHMCS has marked the invoice Refunded (what a full refund through its own
+ * action does, and what an admin declaring the invoice refunded means), or the refunds
+ * booked against it add up to its total (several partial refunds that reach the total
+ * ARE a full refund). Money is stored to the cent, so compare to the half-cent.
+ * Shared with vpnhood-refund-memory.php.
+ */
+function vpnhoodstore_isRefundedInFull(int $invoiceId): bool
+{
+    $invoice = Capsule::table('tblinvoices')->where('id', $invoiceId)->first(['total', 'status']);
+    if ($invoice === null) {
+        return false;
+    }
+    $total = round((float) $invoice->total, 2);
+    return (string) $invoice->status === 'Refunded'
+        || ($total > 0 && vpnhoodstore_refundedTotal($invoiceId) >= $total - 0.005);
 }
 
 /** Named (not a closure) so the integration test can drive it directly. */
@@ -90,25 +109,17 @@ function vpnhoodstore_refundTerminateHook(array $vars): void
             return;
         }
 
-        // Two independent signals that the WHOLE sale is being undone, because the
-        // core is encoded and cannot be read: WHMCS marking the invoice Refunded
-        // (what a full refund through its own action does, and what an admin
-        // declaring the invoice refunded means), or the refunds booked against it
-        // adding up to its total. Either one revokes; neither one, and the key
-        // stays. Money is stored to the cent, so compare to the half-cent.
-        $invoice = Capsule::table('tblinvoices')->where('id', $invoiceId)->first(['total', 'status']);
-        if ($invoice === null) {
-            return;
-        }
-        $total = round((float) $invoice->total, 2);
-        $refunded = vpnhoodstore_refundedTotal($invoiceId);
-        $isFullRefund = (string) $invoice->status === 'Refunded'
-            || ($total > 0 && $refunded >= $total - 0.005);
-        if (!$isFullRefund) {
+        // A full refund revokes; anything less, and the key stays.
+        if (!vpnhoodstore_isRefundedInFull($invoiceId)) {
+            $invoice = Capsule::table('tblinvoices')->where('id', $invoiceId)->first(['total', 'status']);
+            if ($invoice === null) {
+                return;
+            }
             localAPI('LogActivity', ['description' => sprintf(
                 'vpnhoodstore: invoice #%d is not refunded in full (%.2f of %.2f given back, status %s) — service(s) #%s left running. '
                 . 'A partial refund keeps the key on purpose (lifecycle §8); revoke by hand if the whole sale is being undone.',
-                $invoiceId, $refunded, $total, (string) $invoice->status, implode(', #', $candidates))]);
+                $invoiceId, vpnhoodstore_refundedTotal($invoiceId), round((float) $invoice->total, 2), (string) $invoice->status,
+                implode(', #', $candidates))]);
             return;
         }
 

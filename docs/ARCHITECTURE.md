@@ -70,6 +70,22 @@ Global settings store (API Key, Project ID, reseller restriction settings) in
 `tbladdonmodules`. Also drives the product-visibility hook
 `includes/hooks/vpnhoodstore-restrict-user-group-products.php`.
 
+### `includes/hooks/` — the refund hooks
+Two `InvoiceRefunded` hooks, which ship with every hub install:
+
+- `vpnhoodstore-refund-terminate.php` — a FULL refund ends every `vpnhoodstore` service on the
+  invoice (lifecycle §8: the money and the service go back together); a partial refund keeps
+  the key, and `keepOnRefund=yes` on the service keeps it through a full one. "In full" is
+  `vpnhoodstore_isRefundedInFull()`: WHMCS marked the invoice Refunded, or the refunds booked
+  against it (`gateway_funds_out` rows) reach its total.
+- `vpnhood-refund-memory.php` — a full refund of a website invoice (not the `vpnhoodiappay`
+  gateway: a store refund is the store's decision and record) remembers the client's address as
+  a one-way hash with the date, one row per address (`mod_vpnhood_refund_memory`), for 24 months
+  (the daily cron prunes). Its `AdminInvoicesControlsOutput` hook warns on a Paid website invoice
+  whose client's address is remembered; it blocks nothing — WHMCS has no hook that runs before a
+  refund — so the admin decides. Covered by `tests/integration/refund-memory.test.sh`; the
+  terminate hook by `default-key.test.sh`.
+
 ### `modules/addons/vpnhoodverify/` (addon) — forced email verification
 Makes email verification mandatory for the client area. WHMCS's own
 `EnableEmailVerification` (General Settings → Security) mails the link and records the
@@ -561,7 +577,8 @@ The integration suites in `tests/integration/` run against the dev WHMCS (see it
 `purchase-recovery.test.sh` (every failure path of a purchase and its recovery),
 `connector-idempotency.test.sh` (the connector's side, and both directions of compatibility
 with the previous releases), `refund.test.sh` (refunds, the service-action lock and the ended
-guards, the connector's Refund button), plus the buyer lifecycle scripts. `tests/unit/run.sh`
+guards, the connector's Refund button), `refund-memory.test.sh` (the refund memory and its
+warning), plus the buyer lifecycle scripts. `tests/unit/run.sh`
 runs the unit tests (pure PHP, e.g. `RefundPolicy`) with the dev box's PHP, since there is none
 locally. By hand, against a live WHMCS:
 

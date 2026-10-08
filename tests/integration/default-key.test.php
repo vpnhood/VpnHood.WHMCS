@@ -64,47 +64,6 @@ function placeKeyOrder(PDO $db, int $clientId, int $productId): array
     return ['order' => $orderId, 'invoice' => $invoiceId, 'service' => $serviceId];
 }
 
-/**
- * Give money back on an invoice until $fraction of its total has been refunded in
- * all, and return what this call booked (0 when that much was already back).
- *
- * This is the ONE place these tests write a row by hand instead of going through
- * localAPI, and the reason is that the API cannot do it: `AddTransaction` refuses
- * an invoice that is already Paid ("The system cannot modify the updated_at
- * attribute on an invoice that is in the Paid status"), which every refundable
- * invoice is. So the row is written in exactly the shape WHMCS's own admin Refund
- * action produces — copied off a real refund on the dev box (invoice #613):
- * `gateway_funds_out`, `refundid` pointing at the payment it reverses, the
- * payment's own gateway/currency/rate. The hook reads that shape back; anything
- * looser would test a fiction.
- */
-function refundInvoice(PDO $db, int $invoiceId, float $fraction): float
-{
-    $invoice = one($db, 'SELECT total FROM tblinvoices WHERE id=?', [$invoiceId]);
-    if ($invoice === null) {
-        throw new RuntimeException("invoice #$invoiceId vanished");
-    }
-    $payment = one($db, 'SELECT id FROM tblaccounts WHERE invoiceid=? AND amountin>0 AND amountout=0 ORDER BY id LIMIT 1', [$invoiceId]);
-    if ($payment === null) {
-        throw new RuntimeException("invoice #$invoiceId carries no payment to refund");
-    }
-    $total = round((float)$invoice['total'], 2);
-    $already = (float) (one($db, 'SELECT COALESCE(SUM(amountout),0) s FROM tblaccounts WHERE invoiceid=? AND refundid>0', [$invoiceId])['s'] ?? 0);
-    $amount = round(($fraction >= 1.0 ? $total : round($total * $fraction, 2)) - $already, 2);
-    if ($amount <= 0) {
-        return 0.0;
-    }
-    $st = $db->prepare(
-        "INSERT INTO tblaccounts (userid, currency, gateway, date, description, amountin, fees,
-                                  amountout, rate, transid, invoiceid, refundid, type, relid)
-         SELECT userid, currency, gateway, NOW(), CONCAT('Refund of Transaction ID ', id), 0.00, 0.00,
-                ?, rate, CONCAT('refund_', id), invoiceid, id, 'gateway_funds_out', 0
-         FROM tblaccounts WHERE id = ?"
-    );
-    $st->execute([$amount, (int)$payment['id']]);
-    return $amount;
-}
-
 try {
     // -- 1. first key = default; second never steals it -----------------------
     $first = placeKeyOrder($db, (int)$buyer['id'], (int)$prod['id']);
