@@ -18,6 +18,10 @@
  *    It is logged with the services it left running — silence would be its own
  *    accident, and the merchant can still revoke by hand.
  *
+ * A fully refunded RENEWAL invoice ends the whole service too, by design, not just the cycle
+ * it paid for: winding `nextduedate` back to the last paid cycle would make WHMCS invoice the
+ * refunded cycle again. *Refund and keep* is the way to leave such a service running.
+ *
  * "In full" is vpnhoodstore_isRefundedInFull: WHMCS has marked the invoice Refunded,
  * or the refunds booked against it add up to its total. The refund memory
  * (vpnhood-refund-memory.php) judges by the same function.

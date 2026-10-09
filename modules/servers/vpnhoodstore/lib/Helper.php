@@ -22,9 +22,10 @@ class Helper {
         // Save the accessTokenId to the service properties.
         $params['model']->serviceProperties->save(['accessTokenId' => $accessTokenId]);
 
-        // Claim-by-code needs to find the service behind a pasted code, and this
-        // install never persists codes — so store a one-way hash instead (MANAGER
-        // cannot search by code; probed 2026-08-14). The hash opens nothing.
+        // TODO: drop accessCodeHash and isDefaultKey in the next release. Nothing reads either
+        // since the IAP module's keyring (vpnhoodiap 1.2.0) replaced claim-by-code and the stored
+        // default key; only tests assert them, and the hash can cost an extra access-manager call
+        // per sale. The partner connector's isDefaultKey goes with them.
         $accessCode = (string)($data[0]['accessCode'] ?? '');
         if ($accessCode === '') {
             $codeJson = json_decode($apiService->getAccessCode($accessTokenId));
@@ -33,17 +34,12 @@ class Helper {
         if ($accessCode !== '')
             $params['model']->serviceProperties->save(['accessCodeHash' => hash('sha256', trim($accessCode))]);
 
-        // The FIRST key a client buys becomes their default at purchase time
-        // (lifecycle §8) — later purchases never steal that slot, and stock never
-        // qualifies (this is the single-sale path only).
         self::markDefaultKeyIfFirst($params);
     }
 
     /**
      * Mark this service as the client's default key when no other active service
-     * of theirs is marked. The default is what the app applies for the buyer
-     * themselves, and what the store-purchase gate refuses on — a deliberate
-     * remove/change in the app is what ever clears it.
+     * of theirs is marked. Unread; see the TODO in the caller.
      */
     public static function markDefaultKeyIfFirst(array $params): void {
         $clientId = (int)$params['userid'];
