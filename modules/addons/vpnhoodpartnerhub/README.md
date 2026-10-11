@@ -22,9 +22,7 @@ provisioning (the existing `vpnhoodstore` / `Helper` / `ApiService` do that).
 1. Copy `modules/addons/vpnhoodpartnerhub/` into your WHMCS `/modules/addons/`.
 2. **System Settings → Addon Modules → VpnHood! Partner Hub → Activate**. Activation
    creates the tables `mod_vpnhood_partners`, `mod_vpnhood_partner_products`,
-   `mod_vpnhood_partner_log` and `mod_vpnhood_partner_purchases` (an installed Hub that
-   predates the last one creates it on its first order, and records the orders it placed
-   before from the request log). **Deactivating preserves partner data** (partners keep their
+   `mod_vpnhood_partner_log` and `mod_vpnhood_partner_purchases`. **Deactivating preserves partner data** (partners keep their
    API credentials across a deactivate/reactivate); to remove the module's data
    permanently, drop those tables manually.
 
@@ -42,7 +40,8 @@ provisioning (the existing `vpnhoodstore` / `Helper` / `ApiService` do that).
    `AddOrder` requires. The gateway only labels the partner order invoices — they are still
    settled from the partner's credit balance — but WHMCS needs a valid one. Set the
    **Partner Refund Window (days)**: how long after payment a partner can refund a new key
-   through the API (default 7; `0` turns partner refunds off; see *Refunds*).
+   through the API (default 7; `0` turns partner refunds off; see *Refunds*). Set **API Log
+   Retention (days)**: how long the partner API log keeps each call (default 90; see *Audit*).
 
    The field reports the state of the current value in its own description on the
    configuration screen, including immediately after **Save Changes**: green when the value
@@ -272,8 +271,10 @@ hand in WHMCS, renewals included; the window binds only the API.
   partner can only order mapped products and only act on their own services.
 - **Secret at rest.** The API secret is stored hashed (`password_hash`) and verified with
   `password_verify`; transport is expected over HTTPS.
-- **Audit.** Every call is logged to `mod_vpnhood_partner_log` and errors to the WHMCS
-  module log (`vpnhoodpartnerhub`).
+- **Audit.** Every call is logged to `mod_vpnhood_partner_log` — the partner's address, the
+  request and the answer, delivered keys included — for the days *API Log Retention* names
+  (90 while unset; the daily cron deletes older calls), and errors to the WHMCS module log
+  (`vpnhoodpartnerhub`).
 
 ## Purchases needing attention
 

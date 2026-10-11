@@ -14,6 +14,8 @@ require_once __DIR__ . '/RefundPolicy.php';
  */
 class PartnerRepository
 {
+    public const DEFAULT_LOG_RETENTION_DAYS = 90;
+
     /** Fetch addon settings (stored by WHMCS in tbladdonmodules). */
     public function settings(): array
     {
@@ -27,6 +29,9 @@ class PartnerRepository
             'currency'           => $rows['DefaultCurrency'] ?? 'USD',
             'orderGateway'       => trim($rows['OrderGateway'] ?? ''),
             'refundDays'         => RefundPolicy::days($rows['PartnerRefundDays'] ?? null),
+            // blank or not a whole number keeps the default rather than emptying the log
+            'logRetentionDays'   => ctype_digit(trim((string) ($rows['PartnerLogRetentionDays'] ?? '')))
+                ? max(1, (int) $rows['PartnerLogRetentionDays']) : self::DEFAULT_LOG_RETENTION_DAYS,
         ];
     }
 
@@ -386,6 +391,13 @@ class PartnerRepository
         } catch (\Throwable $e) {
             // Logging must never break the request.
         }
+    }
+
+    /** The daily cleanup: calls older than the PartnerLogRetentionDays setting go. */
+    public function pruneLog(): int
+    {
+        $cutoff = date('Y-m-d H:i:s', time() - $this->settings()['logRetentionDays'] * 86400);
+        return Capsule::table('mod_vpnhood_partner_log')->where('created_at', '<', $cutoff)->delete();
     }
 
     private function generateKey(int $length): string

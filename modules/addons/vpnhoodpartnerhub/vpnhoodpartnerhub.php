@@ -68,6 +68,13 @@ function vpnhoodpartnerhub_config(): array
                 'Description'  => 'Days after payment in which a partner can refund a newly bought key through the API: the key ends and its price returns to the partner\'s credit. Renewals are never refundable this way. 0 turns partner refunds off.',
                 'Default'      => '7',
             ],
+            'PartnerLogRetentionDays' => [
+                'FriendlyName' => 'API Log Retention (days)',
+                'Type'         => 'text',
+                'Size'         => '4',
+                'Description'  => 'Days the partner API log keeps each call: the partner\'s address, the request and the answer, delivered keys included. The daily cleanup deletes older calls.',
+                'Default'      => '90',
+            ],
         ],
     ];
 }

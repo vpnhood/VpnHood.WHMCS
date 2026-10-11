@@ -173,6 +173,8 @@ mod_vpnhood_partner_products
 
 mod_vpnhood_partner_log
   id, partner_id, action, remote_ip, http_status, request, response, created_at
+  Kept for PartnerLogRetentionDays (90 while unset): the addon's hooks.php prunes it daily
+  (PartnerRepository::pruneLog).
 
 mod_vpnhood_partner_purchases
   id, partner_id, client_id,
