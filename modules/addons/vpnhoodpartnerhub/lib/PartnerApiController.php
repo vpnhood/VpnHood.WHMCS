@@ -158,7 +158,7 @@ class PartnerApiController
 
         return array_merge(
             ['upstreamOrderId' => $orderId],
-            $this->processor(false)->readDelivery((int) $service->id, $orderId)
+            $this->processor()->readDelivery((int) $service->id, $orderId)
         );
     }
 
@@ -201,7 +201,7 @@ class PartnerApiController
 
         $billingCycle = $this->resolveBillingCycle($mapping, (string) ($body['billingCycle'] ?? ''));
         $productId = (int) $mapping['whmcs_product_id'];
-        $processor = $this->processor(true);
+        $processor = $this->processor();
 
         if ($key !== '') {
             $result = $processor->orderKeyed(
@@ -257,7 +257,7 @@ class PartnerApiController
         $mapping = $this->mappedProduct($downstreamRef);
         $billingCycle = $this->resolveBillingCycle($mapping, (string) ($body['billingCycle'] ?? ''));
 
-        $entry = $this->processor(true)->link(
+        $entry = $this->processor()->link(
             (int) $mapping['whmcs_product_id'],
             $billingCycle,
             $customerReference,
@@ -286,18 +286,9 @@ class PartnerApiController
         );
     }
 
-    /**
-     * @param bool $needsPurchases whether the purchase records must be initialized first
-     *                             (ordering and linking read them; renewals and key reads do not)
-     * @throws ApiException
-     */
-    private function processor(bool $needsPurchases): PurchaseProcessor
+    private function processor(): PurchaseProcessor
     {
-        $purchases = new PurchaseRepository();
-        if ($needsPurchases && !$purchases->ensureReady(PurchaseProcessor::KEY_LOCK_SECONDS)) {
-            throw new ApiException('The Hub is initializing its purchase records; retry shortly.', 409, 'initializing');
-        }
-        return new PurchaseProcessor($this->repo, $purchases, $this->partner);
+        return new PurchaseProcessor($this->repo, new PurchaseRepository(), $this->partner);
     }
 
     // -- Lifecycle relays ---------------------------------------------------
@@ -343,7 +334,7 @@ class PartnerApiController
 
             // In full or not at all: paying a Hosting renewal invoice is what triggers WHMCS's
             // standard renewal (nextduedate advance + vpnhoodstore_Renew).
-            $this->processor(false)->settleInvoiceLocked($invoiceId);
+            $this->processor()->settleInvoiceLocked($invoiceId);
 
             // Guarantee the token expiry matches the (now advanced) nextduedate, whether or
             // not paying the invoice already ran vpnhoodstore_Renew. Idempotent either way.
@@ -425,7 +416,7 @@ class PartnerApiController
     private function refund(array $body): array
     {
         $orderId = $this->requestedOrderId($body);
-        $processor = $this->processor(true);
+        $processor = $this->processor();
         $days = $this->repo->settings()['refundDays'];
         return $this->withServiceLock(
             fn (): array => $processor->refundLocked($orderId, (int) $this->ownedServiceByOrder($orderId)->id, $days)

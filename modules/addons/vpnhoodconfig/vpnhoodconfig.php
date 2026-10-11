@@ -41,6 +41,14 @@ function vpnhoodconfig_config()
                 'Description'  => 'Enter product group names separated by commas. Example: Product 1,Product 2',
                 'Default'      => ''
             ],
+
+            'RefundMemoryMonths' => [
+                'FriendlyName' => 'Refund Memory (months)',
+                'Type'         => 'text',
+                'Size'         => '6',
+                'Description'  => 'How long a full website refund is remembered, to warn on the next invoice of the same email address. Enter what your privacy policy promises.',
+                'Default'      => '24'
+            ],
         ]
     ];
 }

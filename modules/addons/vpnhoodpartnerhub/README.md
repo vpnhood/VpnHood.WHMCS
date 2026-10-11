@@ -138,7 +138,7 @@ for every new purchase. **Without a key, every call buys**, as it always has.
 
 | `code` | HTTP | Meaning |
 |--------|------|---------|
-| `in_progress` / `initializing` | 409 | still running (a call with the same key, another action on the same account, or the Hub's first-use setup) — retry |
+| `in_progress` | 409 | still running (a call with the same key, or another action on the same account) — retry |
 | `key_mismatch` | 409 | the key belongs to a different request (product, billing cycle or `customerReference`) |
 | `key_spent` | 409 | the key's order is terminated or cancelled; a replacement needs a new key |
 | `reconcile` | 409 | orders placed **without** a key are live under this `customerReference` (`details.candidates`: `upstreamOrderId, product, billingCycle, status, placedAt`). If one of them is this purchase — its response was lost before you used keys — bind it with `linkOrder`; otherwise repeat the order with `confirmNewPurchase: true` |

@@ -495,48 +495,6 @@ case 'views':
     terminateOrder($orderId);
     break;
 
-// Plan test 9 (a) — while initialization is held, a keyed order waits and never buys.
-case 'hold-init':
-    $name = 'vhhub-' . md5(Capsule::connection()->getDatabaseName() . "\0init");
-    Capsule::connection()->selectOne('SELECT GET_LOCK(?, 0) AS a', [$name]);
-    sleep((int) ($argv[2] ?? 30));
-    exit(0);
-
-case 'init-wait':
-    Capsule::table('tblconfiguration')->where('setting', 'VpnHoodPartnerHubPurchasesReady')->delete();
-    $ordersBefore = orderCount();
-    $started = microtime(true);
-    $r = order(REF_ONETIME, "rt-$run-init", "rt-$run-init");
-    $elapsed = microtime(true) - $started;
-    expect($r['status'] === 409 && codeOf($r) === 'initializing' && $elapsed >= 19,
-        sprintf('initialization held elsewhere: the order waits (%.0f s), then 409 initializing', $elapsed), $r);
-    expect(orderCount() === $ordersBefore && purchase("rt-$run-init") === null, '... and never buys');
-    break;
-
-// Plan test 9 (b) — a back-fill that died midway is resumed by the next request.
-case 'init-resume':
-    // The rows the back-fill writes: keyless orders the request log answered with 200. (No
-    // order runs before initialization finishes, so a real interrupted back-fill has no others.)
-    $logged = [];
-    foreach (Capsule::table('mod_vpnhood_partner_log')->where('action', 'order')->where('http_status', 200)->pluck('response') as $response) {
-        foreach (json_decode((string) $response, true)['keys'] ?? [] as $k) {
-            $logged[] = (int) ($k['upstreamOrderId'] ?? 0);
-        }
-    }
-    $backfilled = Capsule::table(PurchaseRepository::TABLE)->whereNull('idempotency_key')->where('state', 'delivered')
-        ->whereIn('order_id', $logged);
-    $live = (clone $backfilled)->join('tblhosting as h', 'h.id', '=', PurchaseRepository::TABLE . '.service_id')
-        ->pluck(PurchaseRepository::TABLE . '.order_id')->map('intval')->all();
-    // As if the back-fill died midway: its rows gone, no marker.
-    $backfilled->delete();
-    Capsule::table('tblconfiguration')->where('setting', 'VpnHoodPartnerHubPurchasesReady')->delete();
-    $r = hub('linkOrder', ['downstreamRef' => REF_ONETIME, 'customerReference' => 'x', 'idempotencyKey' => "rt-$run-init-resume", 'upstreamOrderId' => 999999999]);
-    expect($r['status'] === 404, 'the next request initializes first', $r);
-    $restored = Capsule::table(PurchaseRepository::TABLE)->whereNull('idempotency_key')->where('state', 'delivered')->pluck('order_id')->map('intval')->all();
-    expect(array_diff($live, $restored) === [], 'every keyless order with a live service is back (' . count($live) . ')', array_diff($live, $restored));
-    expect(Capsule::table('tblconfiguration')->where('setting', 'VpnHoodPartnerHubPurchasesReady')->value('value') === '1', 'the ready marker is set again');
-    break;
-
 // Plan test 14 — a renewal and an order compete for credit enough for one.
 case 'shared-credit-order':
     $key = "rt-$run-renewable";

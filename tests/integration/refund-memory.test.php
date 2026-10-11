@@ -3,7 +3,9 @@
  * refund-memory.test.php — the refund memory and its warning (includes/hooks/vpnhood-refund-memory.php)
  * on the dev WHMCS: a full website refund is remembered once per address, a partial one and a
  * store one are not, the warning shows on another Paid invoice of the same address and not on
- * the refunded invoice itself (nor on a store invoice), and a row past 24 months is pruned.
+ * the refunded invoice itself (nor on a store invoice), and a row is pruned once older than the
+ * RefundMemoryMonths setting (24 while unset). The setting is a tbladdonmodules row no localAPI
+ * command writes: the test sets it and puts it back.
  *
  * Runs ON the dev server (uploaded by refund-memory.test.sh with lib/common.php). Places no
  * order: the invoices are standalone (CreateInvoice), paid through AddInvoicePayment, and
@@ -67,6 +69,18 @@ function warning(int $invoiceId): string
     return vpnhood_refund_memory_warning(['invoiceid' => $invoiceId]);
 }
 
+/** The RefundMemoryMonths setting, as VpnHood! MANAGER Configuration stores it; null removes it. */
+function setMemoryMonths(?string $value): void
+{
+    Capsule::table('tbladdonmodules')->where('module', 'vpnhoodconfig')->where('setting', 'RefundMemoryMonths')->delete();
+    if ($value !== null) {
+        Capsule::table('tbladdonmodules')->insert(['module' => 'vpnhoodconfig', 'setting' => 'RefundMemoryMonths', 'value' => $value]);
+    }
+}
+
+$savedMonths = Capsule::table('tbladdonmodules')->where('module', 'vpnhoodconfig')
+    ->where('setting', 'RefundMemoryMonths')->value('value');
+
 try {
     // -- the folding: one mailbox, one hash -----------------------------------
     vpnhood_refund_memory_hash(' Test.Buyer+promo@GMAIL.com ') === vpnhood_refund_memory_hash('testbuyer@googlemail.com')
@@ -125,18 +139,33 @@ try {
         : bad('a warning on a store invoice');
     warning(0) === '' ? ok('no invoice, no warning') : bad('a warning without an invoice');
 
-    // -- the prune ------------------------------------------------------------
+    // -- the prune: RefundMemoryMonths, 24 while unset -------------------------
+    setMemoryMonths(null);
+    setRefundedAt($hash, date('Y-m-d H:i:s', strtotime('-23 months')));
+    vpnhood_refund_memory_prune();
+    count(memoryRows($hash)) === 1
+        ? ok('the setting unset, a row of 23 months stays')
+        : bad('the setting unset, a row of 23 months was pruned');
     setRefundedAt($hash, date('Y-m-d H:i:s', strtotime('-25 months')));
     vpnhood_refund_memory_prune();
     memoryRows($hash) === []
-        ? ok('a row older than 24 months is pruned')
+        ? ok('the setting unset, a row older than 24 months is pruned')
         : bad('the old row survived the prune');
     warning($partial) === ''
         ? ok('and the warning is gone with it')
         : bad('a warning after the prune');
+
+    vpnhood_refund_memory_record(['invoiceid' => $full]);
+    setRefundedAt($hash, date('Y-m-d H:i:s', strtotime('-7 months')));
+    setMemoryMonths('6');
+    vpnhood_refund_memory_prune();
+    memoryRows($hash) === []
+        ? ok('RefundMemoryMonths 6 prunes a row of 7 months')
+        : bad('a row of 7 months survived RefundMemoryMonths 6');
 } catch (\Throwable $e) {
     bad('exception: ' . $e->getMessage());
 } finally {
+    setMemoryMonths($savedMonths === null ? null : (string) $savedMonths);
     Capsule::table('mod_vpnhood_refund_memory')->where('email_hash', $hash)->delete();
     foreach ($invoices as $invoiceId) {
         $db->prepare('DELETE FROM tblaccounts WHERE invoiceid=?')->execute([$invoiceId]);

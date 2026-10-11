@@ -91,7 +91,6 @@ token). Orders go through the real Hub API over HTTPS as the test partner (`.env
 | `views` | the client area's "VpnHood order #N — your reference R" and the admin tab's purchase record |
 | `link-race` | two keys linking one keyless order at once: exactly one wins |
 | `shared-credit` | a renewal and an order at once with credit for one: one succeeds, one `402`, never negative (runs WHMCS's Generate Invoices) |
-| `init` | first-use initialization held elsewhere: a keyed order waits, then `409 initializing`, never buys; an interrupted back-fill is resumed |
 
 ⚠ Spends reseller (test) credit and provisions real tokens; everything it orders is
 terminated (or, for CSV batches, expired and disabled).

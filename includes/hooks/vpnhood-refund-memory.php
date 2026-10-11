@@ -6,7 +6,8 @@
  * A person refunded on the website once and asking again should not get a second refund
  * unnoticed. When an invoice is refunded in full (vpnhoodstore_isRefundedInFull: WHMCS marked
  * it Refunded, or the refunds booked against it reach its total), the refunded client's
- * address is remembered as a one-way hash with the date, for 24 months. When an admin opens a
+ * address is remembered as a one-way hash with the date, for the months the privacy policy
+ * names (vpnhood_refund_memory_months, 24 by default). When an admin opens a
  * Paid invoice — the only kind WHMCS offers to refund — the page warns if the client's address
  * is remembered. The warning informs and blocks nothing: WHMCS has no hook that runs before a
  * refund and can stop it, so the decision stays with the admin.
@@ -14,7 +15,7 @@
  * Not recorded: a partial refund (goodwill, lifecycle §8), and a refund of an app-store
  * invoice (the `vpnhoodiappay` gateway: the store decides those refunds and keeps its own
  * records). One row per address, carrying the date of its last full refund; the daily cron
- * drops rows older than 24 months.
+ * drops rows older than those months.
  *
  * The hash is the sha256 of the folded address (vpnhood_refund_memory_hash): it can answer
  * "refunded before?" but cannot be turned back into the address, and it survives the
@@ -61,13 +62,7 @@ function vpnhood_refund_memory_client_email(int $clientId): ?string
     return $email === '' || str_ends_with($email, '@anonymized.invalid') ? null : $email;
 }
 
-/**
- * The table, created on first use. Migration (2026-10): drop a few months after it ships. The
- * first shape kept one row per refunded invoice, store and partial refunds included; the rows
- * that still count (a website invoice, refunded in full) fold into one row per address, so
- * refunds recorded before this shape still warn. Rows went in as the refunds happened, so an
- * address's highest id carries its last refund's date.
- */
+/** The table, created on first use: a hook file has no activation to create it. */
 function vpnhood_refund_memory_prepare(): void
 {
     $schema = Capsule::schema();
@@ -77,26 +72,19 @@ function vpnhood_refund_memory_prepare(): void
             $table->string('email_hash', 64)->unique();
             $table->timestamp('refunded_at')->nullable()->index();
         });
-        return;
     }
-    if (!$schema->hasColumn('mod_vpnhood_refund_memory', 'invoice_id')) {
-        return;
-    }
-    foreach (Capsule::table('mod_vpnhood_refund_memory')->get() as $row) {
-        $gateway = Capsule::table('tblinvoices')->where('id', (int) $row->invoice_id)->value('paymentmethod');
-        if ($gateway === null || (string) $gateway === 'vpnhoodiappay' || !vpnhoodstore_isRefundedInFull((int) $row->invoice_id)) {
-            Capsule::table('mod_vpnhood_refund_memory')->where('id', $row->id)->delete();
-        }
-    }
-    Capsule::statement('DELETE a FROM mod_vpnhood_refund_memory a JOIN mod_vpnhood_refund_memory b'
-        . ' ON a.email_hash = b.email_hash AND a.id < b.id');
-    $schema->table('mod_vpnhood_refund_memory', function ($table) {
-        $table->dropUnique(['invoice_id']);
-        $table->dropColumn('invoice_id');
-        $table->dropIndex(['email_hash']);
-        $table->unique('email_hash');
-    });
-    Capsule::statement('ALTER TABLE mod_vpnhood_refund_memory CHANGE created_at refunded_at TIMESTAMP NULL');
+}
+
+/**
+ * How long a refund is remembered: the RefundMemoryMonths setting of VpnHood! MANAGER
+ * Configuration, which an install sets to what its privacy policy names. 24 while unset; a
+ * value that is not a number keeps the shortest, one month.
+ */
+function vpnhood_refund_memory_months(): int
+{
+    $setting = Capsule::table('tbladdonmodules')->where('module', 'vpnhoodconfig')
+        ->where('setting', 'RefundMemoryMonths')->value('value');
+    return max(1, (int) ($setting ?: 24));
 }
 
 /** InvoiceRefunded: remember the address once the whole sale of a website invoice is undone. */
@@ -167,13 +155,13 @@ function vpnhood_refund_memory_warning(array $vars): string
     }
 }
 
-/** DailyCronJob: the memory keeps exactly what the privacy policy discloses, 24 months. */
+/** DailyCronJob: the memory keeps exactly what the privacy policy discloses. */
 function vpnhood_refund_memory_prune(): void
 {
     try {
         vpnhood_refund_memory_prepare();
         Capsule::table('mod_vpnhood_refund_memory')
-            ->where('refunded_at', '<', date('Y-m-d H:i:s', strtotime('-24 months')))
+            ->where('refunded_at', '<', date('Y-m-d H:i:s', strtotime('-' . vpnhood_refund_memory_months() . ' months')))
             ->delete();
     } catch (\Throwable $e) {
         logModuleCall('vpnhood', 'hook.refund-memory-prune', [], $e->getMessage(), '');

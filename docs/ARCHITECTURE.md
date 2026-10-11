@@ -80,8 +80,9 @@ Two `InvoiceRefunded` hooks, which ship with every hub install:
   against it (`gateway_funds_out` rows) reach its total.
 - `vpnhood-refund-memory.php` — a full refund of a website invoice (not the `vpnhoodiappay`
   gateway: a store refund is the store's decision and record) remembers the client's address as
-  a one-way hash with the date, one row per address (`mod_vpnhood_refund_memory`), for 24 months
-  (the daily cron prunes). Its `AdminInvoicesControlsOutput` hook warns on a Paid website invoice
+  a one-way hash with the date, one row per address (`mod_vpnhood_refund_memory`), for the months
+  the install's privacy policy names: `RefundMemoryMonths` in VpnHood! MANAGER Configuration, 24
+  while unset (the daily cron prunes). Its `AdminInvoicesControlsOutput` hook warns on a Paid website invoice
   whose client's address is remembered; it blocks nothing — WHMCS has no hook that runs before a
   refund — so the admin decides. Covered by `tests/integration/refund-memory.test.sh`; the
   terminate hook by `default-key.test.sh`.
@@ -139,8 +140,8 @@ a secured API; it does not own credit or provisioning.**
 - `lib/PurchaseProcessor.php` — ordering as a sequence of confirmed steps: `AddOrder`,
   payment from **native WHMCS credit**, `AcceptOrder`, then the access code read back through
   `ApiService`/`Helper`; resume, `linkOrder`, and the admin Retry/Release.
-- `lib/PurchaseRepository.php` — `mod_vpnhood_partner_purchases`, its first-use initialization,
-  the named locks, and the footprint queries.
+- `lib/PurchaseRepository.php` — `mod_vpnhood_partner_purchases` and its creation, the named
+  locks, and the footprint queries.
 - `lib/RefundPolicy.php` — whether an order may be refunded through the API, decided from facts
   the caller reads; no database, so `tests/unit` checks every rule (see *Service actions and
   refunds*).
@@ -188,14 +189,9 @@ mod_vpnhood_partner_purchases
 `mod_vpnhood_partner_purchases` has one row per Hub order, keyed or not (a keyless order of
 quantity N is N rows). `state` is the last step whose result is **confirmed**:
 `created → ordered → paid → provisioned → delivered`, or `rolled_back`, `needs_reconciliation`.
-The Hub has no upgrade step, so `PurchaseRepository::ensureReady()` creates the table on first
-use (`_activate` calls it too) under a named init lock, back-fills a keyless `delivered` row for
-every order the request log answered with 200 (insert-if-absent by order id, so an interrupted
-run is resumed), then sets `tblconfiguration.VpnHoodPartnerHubPurchasesReady`. `order` and
-`linkOrder` wait for it (20 s, then `409 initializing`): a guard reading a half back-filled table
-could miss a legacy order and buy twice. The index names are explicit because Laravel's
-generated ones exceed MariaDB's 64 characters; a creation that fails midway drops the table so
-the next request starts over.
+`_activate` creates the table (`PurchaseRepository::createTable()`). The index names are
+explicit because Laravel's generated ones exceed MariaDB's 64 characters; a creation that fails
+midway drops the table so the next activation starts over.
 
 ## Request lifecycle — `order` action
 
@@ -484,14 +480,12 @@ Known limits, left as they are:
 
 - **New API action:** add a `case` in `PartnerApiController::handle`, implement a private
   method, document it in the addon `README.md` table and in the connector's API contract doc.
-- **New partner attribute:** add a column in `_activate` (and handle upgrades — see below),
-  surface it in `_output`, read it in `PartnerRepository`/`Auth`.
-- **Schema upgrades:** `_activate` only creates tables when missing, and there is no upgrade
-  step, so an installed Hub never re-runs it. A new table is created where it is first needed,
-  under a lock, with a completion marker (see `PurchaseRepository::ensureReady()`); for changes
-  to an already-installed table, guard with `Schema::hasColumn(...)` and `ALTER` — do not
-  assume a fresh install. Name indexes explicitly (MariaDB allows 64 characters). Keep
-  `_deactivate` in sync.
+- **New partner attribute:** add a column in `_activate` (an existing install gets it by hand —
+  see below), surface it in `_output`, read it in `PartnerRepository`/`Auth`.
+- **Schema changes:** `_activate` creates every table in its current shape, only when missing,
+  and an installed Hub never re-runs it. There are no upgrade steps or migrations in the Hub: a
+  change an existing install needs is made there by hand. Name indexes explicitly (MariaDB
+  allows 64 characters). Keep `_deactivate` in sync.
 - **New API behaviour a connector depends on:** advertise it in
   `PartnerApiController::FEATURES` (the `X-Vpnhood-Hub-Features` header), so a connector can
   tell a Hub that has it from one that does not.

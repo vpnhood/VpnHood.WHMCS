@@ -31,59 +31,19 @@ class PurchaseRepository
     /** States a request passes through; a row left in one of them is a request that died midway. */
     public const IN_FLIGHT = [self::CREATED, self::ORDERED, self::PAID, self::PROVISIONED];
 
-    /** Set once the table exists and the orders placed before it are back-filled. */
-    private const READY_SETTING = 'VpnHoodPartnerHubPurchasesReady';
-
-    private static bool $ready = false;
-
-    // -- Initialization -----------------------------------------------------
+    // -- Table ----------------------------------------------------------------
 
     /**
-     * Create the table and back-fill the orders placed before it existed. The Hub has no
-     * upgrade step, so this runs on first use (and from _activate). Every lookup waits for it:
-     * a guard reading a half back-filled table could miss a legacy order and buy twice.
-     *
-     * @return bool false when another request still held the initialization after $waitSeconds
+     * Create the table, from vpnhoodpartnerhub_activate(). Laravel adds each index with its own
+     * ALTER after CREATE TABLE, so a failure midway would leave a table without them, which the
+     * next activation would take as done: the table is new and empty here, so it is dropped and
+     * the error goes on.
      */
-    public function ensureReady(int $waitSeconds): bool
+    public function createTable(): void
     {
-        if (self::$ready || $this->isReady()) {
-            self::$ready = true;
-            return true;
+        if (Capsule::schema()->hasTable(self::TABLE)) {
+            return;
         }
-        if (!$this->lock('init', $waitSeconds)) {
-            return false;
-        }
-        try {
-            if (!$this->isReady()) {
-                if (!Capsule::schema()->hasTable(self::TABLE)) {
-                    $this->createTable();
-                }
-                $this->backfill();
-                \WHMCS\Config\Setting::setValue(self::READY_SETTING, '1');
-            }
-        } finally {
-            $this->unlock('init');
-        }
-        self::$ready = true;
-        return true;
-    }
-
-    /** Whether the table is usable. Read-only callers (client area, admin tab) check this instead of initializing. */
-    public function isReady(): bool
-    {
-        // Read directly: the setting must reflect another request's write, not this request's cache.
-        return Capsule::table('tblconfiguration')->where('setting', self::READY_SETTING)->value('value') === '1'
-            && Capsule::schema()->hasTable(self::TABLE);
-    }
-
-    /**
-     * Laravel adds each index with its own ALTER after CREATE TABLE, so a failure midway leaves
-     * a table without them — which the next request would take as done. The table is new and
-     * empty here (under the init lock), so drop it and let the next request start over.
-     */
-    private function createTable(): void
-    {
         try {
             $this->createTableColumns();
         } catch (\Throwable $e) {
@@ -116,68 +76,6 @@ class PurchaseRepository
             $table->index(['partner_id', 'customer_reference'], 'vhpurchase_partner_reference');
             $table->index('state', 'vhpurchase_state');
         });
-    }
-
-    /**
-     * Record every order the Hub answered before this table existed, from the request log:
-     * the logged request carries the reference, the logged response the order ids. Insert-if-
-     * absent by order id, so a run that dies midway is resumed by the next one.
-     */
-    private function backfill(): void
-    {
-        $rows = Capsule::table('mod_vpnhood_partner_log')
-            ->where('action', 'order')
-            ->where('http_status', 200)
-            ->whereNotNull('partner_id')
-            ->orderBy('id')
-            ->get(['partner_id', 'request', 'response', 'created_at']);
-
-        foreach ($rows as $row) {
-            $request = json_decode((string) $row->request, true);
-            $response = json_decode((string) $row->response, true);
-            if (!is_array($request) || !is_array($response)) {
-                continue;
-            }
-            $reference = (string) ($request['customerReference'] ?? '');
-            if (mb_strlen($reference) > self::MAX_REFERENCE_LENGTH) {
-                $reference = '';
-            }
-            foreach ($response['keys'] ?? [] as $key) {
-                $orderId = (int) ($key['upstreamOrderId'] ?? 0);
-                if ($orderId <= 0 || Capsule::table(self::TABLE)->where('order_id', $orderId)->exists()) {
-                    continue;
-                }
-                $service = Capsule::table('tblhosting')->where('orderid', $orderId)
-                    ->first(['id', 'userid', 'packageid', 'billingcycle']);
-                if ($service === null) {
-                    continue; // deleted since: nothing left to protect or link
-                }
-                Capsule::table(self::TABLE)->insert([
-                    'partner_id'         => (int) $row->partner_id,
-                    'client_id'          => (int) $service->userid,
-                    'idempotency_key'    => null,
-                    'customer_reference' => $reference === '' ? null : $reference,
-                    'product_id'         => (int) $service->packageid,
-                    'billing_cycle'      => self::normalizeCycle((string) $service->billingcycle),
-                    'order_id'           => $orderId,
-                    'invoice_id'         => (int) Capsule::table('tblorders')->where('id', $orderId)->value('invoiceid') ?: null,
-                    'service_id'         => (int) $service->id,
-                    'state'              => self::DELIVERED,
-                    'created_at'         => $row->created_at,
-                    'updated_at'         => $row->created_at,
-                ]);
-            }
-        }
-    }
-
-    /**
-     * The cycle a request resolves to (`monthly`, …, `onetime`) from a service's stored cycle
-     * (`Monthly`, `Semi-Annually`, `One Time`, `Free Account`), so the two compare.
-     */
-    public static function normalizeCycle(string $cycle): string
-    {
-        $cycle = strtolower(str_replace(['-', ' '], '', $cycle));
-        return in_array($cycle, ['onetime', 'freeaccount', 'free'], true) ? 'onetime' : $cycle;
     }
 
     // -- Named locks ----------------------------------------------------------
@@ -336,9 +234,6 @@ class PurchaseRepository
      */
     public function needingAttention(?int $partnerId, int $staleMinutes = 10): array
     {
-        if (!$this->isReady()) {
-            return [];
-        }
         $stale = date('Y-m-d H:i:s', time() - $staleMinutes * 60);
         $query = Capsule::table(self::TABLE)
             ->where(function ($q) use ($stale) {

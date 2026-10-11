@@ -5,8 +5,8 @@
 # Runs the scenarios of purchase-recovery.test.php on the dev box: insufficient credit, a
 # failure after payment finished by the support procedure (keyed and keyless), a rollback that
 # cannot be verified, a request that died after each step, a token whose record was lost, CSV
-# delivery, the client-area and admin views, two keys racing to link one order, a renewal and
-# an order competing for credit enough for one, and initialization (held, then resumed).
+# delivery, the client-area and admin views, two keys racing to link one order, and a renewal
+# and an order competing for credit enough for one.
 #
 # The concurrent scenarios run as parallel processes started from this SSH session (PHP-CLI on
 # the box cannot start any). The failed-rollback scenario installs a dev-only hook
@@ -60,7 +60,7 @@ scenario() { echo "== $*"; remote "$ENV php $T $*"; }
 
 SCENARIOS=("$@")
 [ ${#SCENARIOS[@]} -eq 0 ] && SCENARIOS=(insufficient-credit failure-after-payment keyless-failure-after-payment
-  failed-rollback crash-resume token-record-lost csv views link-race shared-credit init)
+  failed-rollback crash-resume token-record-lost csv views link-race shared-credit)
 
 for s in "${SCENARIOS[@]}"; do
   case "$s" in
@@ -83,11 +83,6 @@ for s in "${SCENARIOS[@]}"; do
       echo "== shared-credit: a renewal and an order at once"
       remote "$ENV php $T call-renew & $ENV php $T call-order rt-$RUN-compete & wait"
       scenario shared-credit-check "rt-$RUN-compete"
-      ;;
-    init)
-      echo "== init: a keyed order while initialization is held elsewhere"
-      remote "$ENV php $T hold-init 30 & sleep 2; $ENV php $T init-wait; rc=\$?; wait; exit \$rc"
-      scenario init-resume
       ;;
     *)
       scenario "$s"

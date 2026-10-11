@@ -73,7 +73,8 @@ function vpnhoodpartnerhub_config(): array
 }
 
 /**
- * Create database tables on activation.
+ * Create database tables on activation, each in its current shape. The Hub has no upgrade
+ * step: a change an existing install needs is made there by hand.
  */
 function vpnhoodpartnerhub_activate(): array
 {
@@ -119,9 +120,7 @@ function vpnhoodpartnerhub_activate(): array
             });
         }
 
-        // The purchase records are also created on first use (an installed Hub never re-runs
-        // this); doing it here back-fills the orders placed so far right away.
-        (new PurchaseRepository())->ensureReady(30);
+        (new PurchaseRepository())->createTable();
 
         return [
             'status'      => 'success',
@@ -142,8 +141,7 @@ function vpnhoodpartnerhub_activate(): array
  * (their stored API keys no longer matched anything). Reactivation is harmless: activate()
  * only creates tables that do not exist. To remove the module's data permanently, drop the
  * mod_vpnhood_partner_log / mod_vpnhood_partner_purchases / mod_vpnhood_partner_products /
- * mod_vpnhood_partners tables manually after uninstalling, and delete the
- * VpnHoodPartnerHubPurchasesReady row of tblconfiguration.
+ * mod_vpnhood_partners tables manually after uninstalling.
  */
 function vpnhoodpartnerhub_deactivate(): array
 {
