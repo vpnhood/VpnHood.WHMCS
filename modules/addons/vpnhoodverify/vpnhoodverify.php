@@ -136,6 +136,32 @@ function vpnhoodverify_deactivate(): array
 }
 
 /**
+ * The upgrade WHMCS has not run yet. WHMCS records an addon's new version, and runs its _upgrade()
+ * where it has one, only when an admin opens Addon Modules, so an update made by extracting files
+ * went unrecorded until someone did; the cron hook (hooks.php) calls this, so an update is
+ * recorded within one cron run. WHMCS's own contract: _upgrade() gets the version that was
+ * installed, and runs only for a newer one. An inactive addon has no version row.
+ */
+function vpnhoodverify_runPendingUpgrade(): void
+{
+    $installed = Capsule::table('tbladdonmodules')
+        ->where('module', VerifyGate::MODULE)->where('setting', 'version')->value('value');
+    $config = vpnhoodverify_config();
+    if ($installed === null || (string) $installed === $config['version']) {
+        return;
+    }
+
+    $upgrade = 'vpnhoodverify_upgrade';
+    if (function_exists($upgrade) && version_compare($config['version'], (string) $installed, '>')) {
+        $upgrade(['version' => (string) $installed]);
+    }
+    Capsule::table('tbladdonmodules')
+        ->where('module', VerifyGate::MODULE)->where('setting', 'version')
+        ->update(['value' => $config['version']]);
+    logActivity("{$config['name']} updated from $installed to {$config['version']}.");
+}
+
+/**
  * Admin page: what the gate is currently doing, and to how many people.
  *
  * The headline number is "clients this gate would currently stop", because the

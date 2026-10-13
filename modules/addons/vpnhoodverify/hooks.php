@@ -137,3 +137,21 @@ add_hook('AfterShoppingCartCheckout', 1, function (array $vars) {
         logModuleCall(VerifyGate::MODULE, 'hook.checkoutGate', (string) $orderId, $e->getMessage(), '');
     }
 });
+
+/**
+ * An update takes effect without an admin: WHMCS records an addon's new version only when an
+ * admin opens Addon Modules, so every cron run catches up on one it has not recorded
+ * (vpnhoodverify_runPendingUpgrade); up to date, that is one indexed read. A failure is logged
+ * and tried again at the next run. The module file is loaded once, guarded, as WHMCS may have
+ * loaded it already.
+ */
+add_hook('AfterCronJob', 1, function () {
+    try {
+        if (!function_exists('vpnhoodverify_runPendingUpgrade')) {
+            require_once __DIR__ . '/vpnhoodverify.php';
+        }
+        vpnhoodverify_runPendingUpgrade();
+    } catch (\Throwable $e) {
+        logActivity('VpnHood! Verify: the upgrade failed, and runs again with the next cron: ' . $e->getMessage());
+    }
+});

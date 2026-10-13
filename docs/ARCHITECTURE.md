@@ -174,7 +174,8 @@ mod_vpnhood_partner_products
 mod_vpnhood_partner_log
   id, partner_id, action, remote_ip, http_status, request, response, created_at
   Kept for PartnerLogRetentionDays (90 while unset): the addon's hooks.php prunes it daily
-  (PartnerRepository::pruneLog).
+  (PartnerRepository::pruneLog), once WHMCS loads that file, which an install that activated
+  the hub before 1.2.20 arranges by hand ("Versioning & releases").
 
 mod_vpnhood_partner_purchases
   id, partner_id, client_id,
@@ -520,6 +521,22 @@ Where the number lands, and why the two mechanisms differ:
 
 > `MetaData()`'s `APIVersion` is the WHMCS *module API* contract, not the module's own
 > version — leave it alone.
+
+**An update takes effect without an admin.** WHMCS records an addon's new version, and runs its
+`_upgrade()`, only when an admin opens System Settings → Addon Modules, so an update made by
+extracting files sat unrecorded until someone did. Each addon's `hooks.php` catches up on the
+cron instead (`AfterCronJob` → `<module>_runPendingUpgrade()`): within one cron run the files'
+version is recorded, `_upgrade()` has run where the module has one (for a newer version only, as
+WHMCS does), and the activity log says `<name> updated from X to Y.` The dashboard widget was
+never affected: it reads the version on disk.
+
+That needs WHMCS to load the addon's `hooks.php`, which it does only for an addon in
+`tblconfiguration.AddonModulesHooks`, a list it writes when an admin activates the addon in the
+admin UI. An addon activated before it had a `hooks.php` is missing there, and none of its hooks
+run: `vpnhoodpartnerhub` gained one in 1.2.20 (the partner log's daily prune), so an install that
+activated it earlier adds it to the list by hand (activating it again would too, but deactivating
+deletes its settings). `tests/integration/pending-upgrade.test.sh` checks the list for this repo's
+addons.
 
 The connector repo (**VpnHood.WHMCS.Partner**) has the same `VERSION` + script + workflow, but
 versions **independently**: the two ship to different WHMCS installs on their own cadence. The

@@ -33,3 +33,21 @@ add_hook('DailyCronJob', 1, function () {
         logModuleCall('vpnhood', 'hook.update-check', [], $e->getMessage(), '');
     }
 });
+
+/**
+ * An update takes effect without an admin: WHMCS records an addon's new version only when an
+ * admin opens Addon Modules, so every cron run catches up on one it has not recorded
+ * (vpnhoodconfig_runPendingUpgrade); up to date, that is one indexed read. A failure is logged
+ * and tried again at the next run. The module file is loaded once, guarded, as WHMCS may have
+ * loaded it already.
+ */
+add_hook('AfterCronJob', 1, function () {
+    try {
+        if (!function_exists('vpnhoodconfig_runPendingUpgrade')) {
+            require_once __DIR__ . '/vpnhoodconfig.php';
+        }
+        vpnhoodconfig_runPendingUpgrade();
+    } catch (\Throwable $e) {
+        logActivity('VpnHood! MANAGER Configuration: the upgrade failed, and runs again with the next cron: ' . $e->getMessage());
+    }
+});

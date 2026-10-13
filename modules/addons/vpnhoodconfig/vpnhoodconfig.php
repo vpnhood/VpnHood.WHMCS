@@ -56,6 +56,32 @@ function vpnhoodconfig_config()
 function vpnhoodconfig_activate() {}
 function vpnhoodconfig_deactivate() {}
 
+/**
+ * The upgrade WHMCS has not run yet. WHMCS records an addon's new version, and runs its _upgrade()
+ * where it has one, only when an admin opens Addon Modules, so an update made by extracting files
+ * went unrecorded until someone did; the cron hook (hooks.php) calls this, so an update is
+ * recorded within one cron run. WHMCS's own contract: _upgrade() gets the version that was
+ * installed, and runs only for a newer one. An inactive addon has no version row.
+ */
+function vpnhoodconfig_runPendingUpgrade(): void
+{
+    $installed = \WHMCS\Database\Capsule::table('tbladdonmodules')
+        ->where('module', 'vpnhoodconfig')->where('setting', 'version')->value('value');
+    $config = vpnhoodconfig_config();
+    if ($installed === null || (string) $installed === $config['version']) {
+        return;
+    }
+
+    $upgrade = 'vpnhoodconfig_upgrade';
+    if (function_exists($upgrade) && version_compare($config['version'], (string) $installed, '>')) {
+        $upgrade(['version' => (string) $installed]);
+    }
+    \WHMCS\Database\Capsule::table('tbladdonmodules')
+        ->where('module', 'vpnhoodconfig')->where('setting', 'version')
+        ->update(['value' => $config['version']]);
+    logActivity("{$config['name']} updated from $installed to {$config['version']}.");
+}
+
 function vpnhoodconfig_output($vars)
 {
     echo '<p>Configure this addon from the <strong>System Settings → Addon Modules → VpnHood! MANAGER Configuration</strong></p>';
