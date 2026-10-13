@@ -174,8 +174,8 @@ mod_vpnhood_partner_products
 mod_vpnhood_partner_log
   id, partner_id, action, remote_ip, http_status, request, response, created_at
   Kept for PartnerLogRetentionDays (90 while unset): the addon's hooks.php prunes it daily
-  (PartnerRepository::pruneLog), once WHMCS loads that file, which an install that activated
-  the hub before 1.2.20 arranges by hand ("Versioning & releases").
+  (PartnerRepository::pruneLog), once WHMCS loads that file: an install that activated the hub
+  before 1.2.20 presses Save Changes once in Addon Modules ("Versioning & releases").
 
 mod_vpnhood_partner_purchases
   id, partner_id, client_id,
@@ -531,11 +531,12 @@ WHMCS does), and the activity log says `<name> updated from X to Y.` The dashboa
 never affected: it reads the version on disk.
 
 That needs WHMCS to load the addon's `hooks.php`, which it does only for an addon in
-`tblconfiguration.AddonModulesHooks`, a list it writes when an admin activates the addon in the
-admin UI. An addon activated before it had a `hooks.php` is missing there, and none of its hooks
-run: `vpnhoodpartnerhub` gained one in 1.2.20 (the partner log's daily prune), so an install that
-activated it earlier adds it to the list by hand (activating it again would too, but deactivating
-deletes its settings). `tests/integration/pending-upgrade.test.sh` checks the list for this repo's
+`tblconfiguration.AddonModulesHooks`. WHMCS writes that list when an admin activates an addon, and
+rebuilds it for every active addon when an admin presses Save Changes on any addon's Configure
+form in Addon Modules (that form saves every addon's settings at once). An addon activated before
+it had a `hooks.php` is missing until then, and none of its hooks run: `vpnhoodpartnerhub` gained
+one in 1.2.20 (the partner log's daily prune), so an install that activated it earlier presses
+Save Changes once. `tests/integration/pending-upgrade.test.sh` checks the list for this repo's
 addons.
 
 The connector repo (**VpnHood.WHMCS.Partner**) has the same `VERSION` + script + workflow, but

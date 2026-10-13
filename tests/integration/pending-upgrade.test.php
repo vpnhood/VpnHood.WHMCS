@@ -42,7 +42,7 @@ foreach (MODULES as $module) {
 
     in_array($module, $hookList, true)
         ? ok("$module is in AddonModulesHooks, so WHMCS loads its cron hook")
-        : bad("$module is active but not in AddonModulesHooks: WHMCS never loads its hooks.php, so add it to the list");
+        : bad("$module is active but not in AddonModulesHooks: WHMCS never loads its hooks.php; Save Changes on any addon in Addon Modules rebuilds the list");
 
     require_once WEBROOT . "/modules/addons/$module/$module.php";
     $config = ("{$module}_config")();
