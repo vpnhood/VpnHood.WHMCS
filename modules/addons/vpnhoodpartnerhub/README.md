@@ -272,9 +272,9 @@ hand in WHMCS, renewals included; the window binds only the API.
 - **Secret at rest.** The API secret is stored hashed (`password_hash`) and verified with
   `password_verify`; transport is expected over HTTPS.
 - **Audit.** Every call is logged to `mod_vpnhood_partner_log` — the partner's address, the
-  request and the answer, delivered keys included — for the days *API Log Retention* names
-  (90 while unset; the daily cron deletes older calls), and errors to the WHMCS module log
-  (`vpnhoodpartnerhub`).
+  request and the answer, with each delivered key masked (`getAccessCode` reads it again) — for
+  the days *API Log Retention* names (90 while unset; the daily cron deletes older calls), and
+  errors to the WHMCS module log (`vpnhoodpartnerhub`).
 
 ## Purchases needing attention
 

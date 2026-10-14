@@ -376,6 +376,7 @@ class PartnerRepository
 
     // -- Logging ------------------------------------------------------------
 
+    /** Delivered keys never reach the log: a partner reads them again with getAccessCode. */
     public function log(?int $partnerId, string $action, ?string $remoteIp, int $httpStatus, $request, $response): void
     {
         try {
@@ -384,13 +385,41 @@ class PartnerRepository
                 'action'      => $action,
                 'remote_ip'   => $remoteIp,
                 'http_status' => $httpStatus,
-                'request'     => is_string($request) ? $request : json_encode($request),
-                'response'    => is_string($response) ? $response : json_encode($response),
+                'request'     => self::withoutDeliveredKeys($request),
+                'response'    => self::withoutDeliveredKeys($response),
                 'created_at'  => date('Y-m-d H:i:s'),
             ]);
         } catch (\Throwable $e) {
             // Logging must never break the request.
         }
+    }
+
+    /**
+     * A body as the log keeps it, as JSON: every accessCode and csv (a batch of codes), at any
+     * depth, replaced by a marker. A string that is not a JSON object or array is kept as it is.
+     */
+    private static function withoutDeliveredKeys($body): string
+    {
+        $json = is_string($body) ? $body : (string) json_encode($body);
+        $decoded = json_decode($json, true);
+        return is_array($decoded) ? (string) json_encode(self::maskKeys($decoded)) : $json;
+    }
+
+    private static function maskKeys($value)
+    {
+        if (!is_array($value)) {
+            return $value;
+        }
+        foreach ($value as $name => $item) {
+            if ($name === 'accessCode' && is_string($item) && $item !== '') {
+                $value[$name] = '[masked]';
+            } elseif ($name === 'csv' && is_string($item) && $item !== '') {
+                $value[$name] = '[masked: ' . count(preg_split('/\R/', trim($item))) . ' lines]';
+            } else {
+                $value[$name] = self::maskKeys($item);
+            }
+        }
+        return $value;
     }
 
     /** The daily cleanup: calls older than the PartnerLogRetentionDays setting go. */

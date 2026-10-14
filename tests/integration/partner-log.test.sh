@@ -2,9 +2,9 @@
 #
 # Runner for its namesake .test.php — see that file for the contract.
 #
-# The partner API log's retention (modules/addons/vpnhoodpartnerhub/hooks.php) on the
-# dev WHMCS. Needs the working tree deployed (scripts/deploy-dev.sh hub). Places no order
-# and spends no credit; removes what it creates.
+# The partner API log on the dev WHMCS: no delivered key in a row, and the retention
+# (modules/addons/vpnhoodpartnerhub/hooks.php). Needs the working tree deployed
+# (scripts/deploy-dev.sh hub). Places no order and spends no credit; removes what it creates.
 #
 # Env overrides: WHMCS_DEV_SSH_KEY, WHMCS_DEV_SSH_HOST
 

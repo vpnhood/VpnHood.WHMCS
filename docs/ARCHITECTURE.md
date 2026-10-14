@@ -173,6 +173,7 @@ mod_vpnhood_partner_products
 
 mod_vpnhood_partner_log
   id, partner_id, action, remote_ip, http_status, request, response, created_at
+  No delivered key: PartnerRepository::log masks every accessCode and csv batch in a body.
   Kept for PartnerLogRetentionDays (90 while unset): the addon's hooks.php prunes it daily
   (PartnerRepository::pruneLog), once WHMCS loads that file: an install that activated the hub
   before 1.2.20 presses Save Changes once in Addon Modules ("Versioning & releases").
