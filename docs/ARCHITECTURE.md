@@ -36,7 +36,10 @@ Provisions VpnHood access tokens directly against the access server. Core pieces
 - `lib/ApiService.php` — REST calls to `https://api.vpnhood.com/api` (token CRUD, access code,
   CSV export, lookups). Reads API key + project id from the `vpnhoodconfig` addon settings.
 - `lib/Helper.php` — business logic: create/update tokens, renew/suspend, fetch access code/CSV.
-  Stores the created token id in the service's `serviceProperties['accessTokenId']`.
+  Stores the created token id in the service's `serviceProperties['accessTokenId']`. A
+  recurring token expires on the service's `nextduedate` at the time of day its order was
+  placed, in UTC (`Helper::expirationTime`), not at the date's midnight: an app store renews at
+  the hour of the original purchase. A one-time token has no expiry until first use.
 - `lib/AsyncApiClientFactory.php` — cURL client (Bearer auth) singleton.
 
 **Product config options** are stored positionally by WHMCS in `tblproducts.configoptionN`,
@@ -237,7 +240,10 @@ midway drops the table so the next activation starts over.
       gets its attempt from `AcceptOrder` (`autosetup` on). No footprint → `needs_reconciliation`
       and `409 not_provisioned`, with WHMCS's own error from its Module Queue in `last_error`:
       **the order is kept** — it is paid — and a person finishes it (below). A Hub product must
-      never provision *on order*: WHMCS would create the token before any payment.
+      never provision *on order*: WHMCS would create the token before any payment. Just before
+      the module creates the token, the addon's `PreModuleCreate` hook gives a recurring key's
+      **first term** its extra day (see *Renewals*), so the token is created with its final
+      expiry.
    4. Read the delivery → `delivered`. A failed read leaves it `provisioned` and answers
       `409 not_delivered`; reading has no side effect, so a repeat or `getAccessCode` retries it.
 6. Response: `{ replayed, keys: [{ upstreamOrderId, customerReference, deliveryType, accessTokenId + accessCode | csv }] }`.
@@ -380,13 +386,38 @@ invoice and its email exactly as standard; it simply stays **Unpaid** until the 
 - **Renewal:** the cron-generated renewal invoice is left completely alone and stays Unpaid.
   `nextduedate` does not advance while it is unpaid, and the token expiry tracks `nextduedate`,
   so **access stops on the real term end** until the partner renews.
-- **Renew:** `PartnerApiController::renew` pays the outstanding invoice from native credit
-  (`402` if short, `409` if nothing outstanding, `409 service_ended` for an ended service) under
-  the same credit lock as orders, held from its status check to its expiry update, so a renewal
-  and an order competing for the last credit cannot both spend it. Paying a Hosting
-  renewal invoice drives WHMCS's normal renewal — `nextduedate` advances one cycle and
-  `vpnhoodstore_Renew` re-syncs the token; the call then re-asserts the token expiry
+- **Renew:** `PartnerApiController::renew` pays the renewal invoice from native credit
+  (`402` if short, `409 service_ended` for an ended service, `409` for a product with no
+  cycle) under the same credit lock as orders, held from its status check to its expiry
+  update, so a renewal and an order competing for the last credit cannot both spend it.
+  Paying a Hosting renewal invoice drives WHMCS's normal renewal — `nextduedate` advances one
+  cycle and `vpnhoodstore_Renew` re-syncs the token; the call then re-asserts the token expiry
   idempotently.
+- **One cycle, whenever asked** (`RenewalPolicy`, unit-tested in `tests/unit`). A partner may
+  renew while less than a full cycle is left. No invoice yet → `GenInvoices` for that one
+  service, which bills its next term whatever the Invoice Generation window (seen on 9.1).
+  With a full cycle or more ahead it pays nothing and answers `current`: a partner never holds
+  two cycles. "A full cycle ahead" is measured back from the due date: months overflow, so
+  measured forward from today a key renewed on 31 Jan from 1 Feb to 1 Mar would fall short of
+  3 Mar, and a repeat would pay again. A lapsed term (its renewal paid after its due date) is
+  moved to the day of payment + one cycle + one day, since WHMCS advanced it from the old due
+  date (`finishRestart`). That is read from the newest paid renewal before every `renew` too, so
+  a request that died between paying and moving the date is finished by the next one, free.
+  Why: an app store bills a reseller's subscriber on its own clock, and the connector relays
+  every store renewal (and IAP's term sync) as `renew` — early, late, or twice.
+- **The first term's extra day** (`vpnhoodpartnerhub_start_term`, a `PreModuleCreate` hook in
+  the addon's `hooks.php`). Paying the order's invoice moves a new recurring key's
+  `nextduedate` to WHMCS's order date + cycle; just before the module creates the token, the
+  hook moves it one day later, so the token is created with that expiry in one access-server
+  call. `Helper::expirationTime` reads the date from `tblhosting`, as WHMCS built the module's
+  params before the hook ran. A store renews on the cycle's last day at the hour of the
+  purchase; with the token ending at the hour of the order (`vpnhoodstore`), the extra day
+  keeps the key running until then. Renewals add cycles to that date, so the day never
+  accumulates. Only a term WHMCS computed itself is moved (31 Aug + 1 month = 1 Oct: WHMCS
+  overflows, and so does `RenewalPolicy`), so a second create (a person's, after a failed one)
+  leaves it alone. If the date cannot be set, the hook aborts the create: the paid purchase
+  waits for a person (`needs_reconciliation`), like any failed provisioning. The hook runs only
+  while WHMCS loads the addon's `hooks.php` ("Versioning & releases").
 - **Scope:** `isPartnerProductService` — the service's product is in
   `mod_vpnhood_partner_products`. Partner products are distinct from retail products, so retail
   is never affected and no per-service marker is needed. Non-Hub services (one-time products,

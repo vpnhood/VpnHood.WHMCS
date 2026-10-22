@@ -361,6 +361,28 @@ class PartnerRepository
         return $id ? (int) $id : null;
     }
 
+    /**
+     * The newest paid renewal of this service — not its order's invoice: the period its line
+     * bills from (the line's due date) and the day it was paid. Null before any renewal.
+     *
+     * @return array{periodStart: string, paidOn: string}|null
+     */
+    public function lastPaidRenewal(int $serviceId): ?array
+    {
+        $orderInvoiceId = (int) Capsule::table('tblhosting as h')->join('tblorders as o', 'o.id', '=', 'h.orderid')
+            ->where('h.id', $serviceId)->value('o.invoiceid');
+        $row = Capsule::table('tblinvoiceitems as i')
+            ->join('tblinvoices as inv', 'i.invoiceid', '=', 'inv.id')
+            ->where('i.type', 'Hosting')
+            ->where('i.relid', $serviceId)
+            ->where('inv.status', 'Paid')
+            ->where('inv.id', '!=', $orderInvoiceId)
+            ->orderBy('inv.id', 'desc')
+            ->first(['i.duedate', 'inv.datepaid']);
+
+        return $row ? ['periodStart' => (string) $row->duedate, 'paidOn' => substr((string) $row->datepaid, 0, 10)] : null;
+    }
+
     /** Outstanding balance (invoice total minus recorded payments). */
     public function invoiceBalance(int $invoiceId): float
     {

@@ -141,7 +141,7 @@ function vpnhoodstore_CreateAccount(array $params): string {
 
         $isOneTimeProduct = $params['model']->product->paytype === "onetime"; //Check if the product is one time payment
         // recurring: the paid period; one-time: none - the access manager starts its lifetime on first use
-        $expirationTime = $isOneTimeProduct ? null : $params['model']['nextduedate'];
+        $expirationTime = $isOneTimeProduct ? null : Helper::expirationTime($params['model']);
 
         // Access Token create params
         $createParams = [

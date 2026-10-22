@@ -178,6 +178,23 @@ class PurchaseProcessor
     }
 
     /**
+     * Have WHMCS generate a key's renewal invoice now, ahead of its Invoice Generation window: for
+     * one service, GenInvoices bills its next term whatever the window (seen on 9.1). The caller
+     * holds the client's credit lock and has checked that no full cycle is paid ahead.
+     *
+     * @throws ApiException
+     */
+    public function generateRenewalInvoiceLocked(int $serviceId): int
+    {
+        LocalApi::call('GenInvoices', ['serviceids' => [$serviceId], 'noemails' => true]);
+        $invoiceId = $this->repo->outstandingRenewalInvoiceId($serviceId);
+        if ($invoiceId === null) {
+            throw new ApiException('WHMCS generated no renewal invoice for this service; nothing was paid. Contact VpnHood support.', 409);
+        }
+        return $invoiceId;
+    }
+
+    /**
      * WHMCS bills a client's same-day renewals on one invoice, so paying it for one key would also
      * pay for keys the partner has already ended. Their lines come off first, or, where that is not
      * safe, the renewal is refused and the invoice fixed by hand.

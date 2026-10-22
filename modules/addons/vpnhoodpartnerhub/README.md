@@ -116,7 +116,7 @@ supports; a Hub that predates it sends nothing.
 >
 > `quantity` above 1 is rejected with HTTP 422 unless the product has **Allow Multiple
 > Quantities** enabled on its Pricing tab (`allowMultipleQuantities` in `getProducts`).
-| `renew` | `upstreamOrderId` | `{ status, nextDueDate }` |
+| `renew` | `upstreamOrderId` | `{ status, nextDueDate }` — `renewed`, or `current` when a full cycle is already paid; see *Renewals are manual* |
 | `suspend` | `upstreamOrderId`, `suspendReason?` | `{ status }` |
 | `unsuspend` | `upstreamOrderId` | `{ status }` |
 | `terminate` / `cancel` | `upstreamOrderId` | `{ status }` |
@@ -195,8 +195,20 @@ its email as standard (partners can disable that notification on their side), bu
 pays it — the partner's credit is never consumed. Nothing renews until the connector calls
 `renew`.
 
-- `renew` settles the outstanding renewal invoice from the partner's native credit, which
-  advances the service one billing cycle and extends the access-server token.
+- `renew` pays one cycle from the partner's native credit, which advances the service one
+  billing cycle and extends the access-server token. It renews whenever less than a full cycle
+  is left: when WHMCS has not generated the renewal invoice yet, `renew` has it generated on the
+  spot, ahead of the Invoice Generation window.
+- One cycle at a time: with a full cycle or more still paid, `renew` charges nothing and answers
+  `200` with `status: current` and the current `nextDueDate`. Calling it twice never pays twice.
+  So a renewal your customer pays a full cycle or more ahead extends nothing: keep your WHMCS's
+  Invoice Generation lead time shorter than the cycle.
+- A lapsed term (its due date passed, e.g. during an app store's payment hold) renews from the
+  day of the renewal, not from its old due date: the partner never pays for days the key did
+  not run.
+- A new key's first term ends a day after its cycle, and every key expires at the hour its order
+  was placed (UTC), not at midnight: an app store renews a subscription at the hour of the
+  original purchase on its last day, and the key must still run then.
 - A renewal never pays for an ended key. WHMCS puts one client's same-day renewals on one
   invoice, so `renew` first takes off the lines of keys that are Terminated, Cancelled or Fraud.
   Where that is not safe (a payment is already on the invoice, a line on it is not tied to a
@@ -204,9 +216,8 @@ pays it — the partner's credit is never consumed. Nothing renews until the con
   nothing.
 - `402` — not enough credit to cover the invoice; nothing is paid (the lines of ended keys may
   already be off it).
-- `409` — no renewal invoice is outstanding yet. One exists once WHMCS has generated the
-  upcoming renewal invoice (inside its Invoice Generation window before the due date).
-- If `renew` is never called, the token expires on the term end date and the end customer's
+- `409` — the order's product is not billed by cycle (one-time), so it has no renewal.
+- If `renew` is never called, the token expires at the term's end and the end customer's
   access stops until the partner renews.
 - `renew` no longer accepts a `nextDueDate` override — WHMCS computes the new term when the
   invoice is paid.

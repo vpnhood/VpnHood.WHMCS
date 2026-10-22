@@ -96,6 +96,25 @@ class Helper {
         $apiService->updateAccessToken($accessTokenId, $updateParams);
     }
 
+    /**
+     * A recurring token's expiry: its service's due date at the time of day the order was placed,
+     * in UTC. A store that resells the key renews at the hour of the original purchase, so the
+     * date's midnight would end the key hours early. A service without an order ends at midnight,
+     * and one without a due date (a one-time service's is 0000-00-00) gets that date unchanged.
+     * Read from the table, not from $model: the Partner Hub's PreModuleCreate hook moves a new
+     * partner key's due date after WHMCS built the module's params.
+     */
+    public static function expirationTime($model): string {
+        $service = Capsule::table('tblhosting')->where('id', (int)$model['id'])->first(['nextduedate', 'orderid']);
+        $dueDate = (string)$service->nextduedate;
+        $orderedAt = (string)Capsule::table('tblorders')->where('id', (int)$service->orderid)->value('date');
+        if ($dueDate === '' || str_starts_with($dueDate, '0000') || $orderedAt === '' || str_starts_with($orderedAt, '0000'))
+            return $dueDate;
+        // WHMCS keeps both in the server's time zone
+        $expiry = new \DateTime($dueDate . ' ' . (new \DateTime($orderedAt))->format('H:i:s'));
+        return $expiry->setTimezone(new \DateTimeZone('UTC'))->format('Y-m-d\TH:i:s\Z');
+    }
+
     /*** Handles Renewal ***/
     public static function renew(array $params): string {
         if (($bulkError = self::bulkDeliveryError($params, 'renewed')) !== null)
@@ -104,10 +123,9 @@ class Helper {
             $accessTokenId = (string)$params['model']->serviceProperties->get('accessTokenId');
             if ($accessTokenId === '')
                 return 'VpnHoodStore Error: no accessTokenId recorded on this service (provisioning incomplete?) — nothing was changed.';
-            $expirationDate = $params['model']['nextduedate'];
             $updateParams = [
                 'expirationTime' => [
-                    'value' => $expirationDate
+                    'value' => self::expirationTime($params['model'])
                 ]
             ];
 

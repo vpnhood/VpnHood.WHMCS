@@ -146,6 +146,20 @@ scenario changes are restored in a `finally`.
 
 The rules themselves (`RefundPolicy`) are unit-tested without WHMCS: `tests/unit/run.sh`.
 
+## renew-term.test.sh — a key's term and its renewals
+
+**`renew-term.test.sh`** — one keyed recurring key over the real Hub API as the test partner
+(`.env`), its due date moved with `UpdateClientProduct` to stand in for the days a term takes:
+the first term ends a day after the cycle and the token at the order's hour; `renew` right
+after the purchase answers `current` and charges nothing; on the last day, and with 20 days left
+(outside the Invoice Generation window), it pays one cycle, its invoice generated on the spot;
+a repeat pays nothing; a term that lapsed 3 days ago restarts today, and one whose renewal was
+paid by a request that died before the restart is finished by the next `renew`, free. The rules
+themselves (`RenewalPolicy`) are unit-tested without WHMCS, month ends included:
+`tests/unit/run.sh`.
+
+⚠ Spends reseller (test) credit and provisions one real token, terminated at the end.
+
 ## hub-api.test.sh — Hub API black-box test
 
 A black-box smoke test for the `vpnhoodpartnerhub` API. It drives the live HTTP

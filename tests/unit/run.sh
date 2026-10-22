@@ -25,5 +25,6 @@ SSH=(ssh -i "$SSH_KEY" -o BatchMode=yes -o ConnectTimeout=15 "$SSH_HOST")
 
 echo "== Running the unit tests with the dev box's PHP"
 "${SSH[@]}" 'rm -rf ~/tmp/vhunit && mkdir -p ~/tmp/vhunit'
-scp -i "$SSH_KEY" -q "$REPO_ROOT/modules/addons/vpnhoodpartnerhub/lib/RefundPolicy.php" "$SCRIPT_DIR/refund-policy.test.php" "$SSH_HOST":tmp/vhunit/
-"${SSH[@]}" 'php ~/tmp/vhunit/refund-policy.test.php ~/tmp/vhunit/RefundPolicy.php; rc=$?; rm -rf ~/tmp/vhunit; exit $rc'
+scp -i "$SSH_KEY" -q "$REPO_ROOT/modules/addons/vpnhoodpartnerhub/lib/RefundPolicy.php" "$SCRIPT_DIR/refund-policy.test.php" \
+  "$REPO_ROOT/modules/addons/vpnhoodpartnerhub/lib/RenewalPolicy.php" "$SCRIPT_DIR/renewal-policy.test.php" "$SSH_HOST":tmp/vhunit/
+"${SSH[@]}" 'cd ~/tmp/vhunit; rc=0; php refund-policy.test.php RefundPolicy.php || rc=1; php renewal-policy.test.php RenewalPolicy.php || rc=1; rm -rf ~/tmp/vhunit; exit $rc'

@@ -10,6 +10,7 @@ require_once __DIR__ . '/../../../servers/vpnhoodstore/lib/Helper.php';
 require_once __DIR__ . '/LocalApi.php';
 require_once __DIR__ . '/PurchaseRepository.php';
 require_once __DIR__ . '/PurchaseProcessor.php';
+require_once __DIR__ . '/RenewalPolicy.php';
 
 use WHMCS\Module\Server\VpnHoodStore\Helper;
 
@@ -298,8 +299,7 @@ class PartnerApiController
     // action on the same account: an unsuspend finishing after a refund would revive its key.
 
     /**
-     * Renew a service by settling its outstanding renewal invoice from the partner's
-     * native WHMCS credit.
+     * Renew a service by settling its renewal invoice from the partner's native WHMCS credit.
      *
      * Partner-Hub products are MANUAL RENEWAL. WHMCS generates the renewal invoice and
      * its email exactly as standard, but with "Automatic Credit Use" off nothing pays
@@ -309,6 +309,11 @@ class PartnerApiController
      * never calls it, the token expires on the term end date and access stops. Lines of keys
      * that have ended come off the invoice first, so a renewal never pays for them.
      *
+     * One cycle at a time, whenever the partner asks (RenewalPolicy): with less than a full
+     * cycle left it renews now, the invoice generated on the spot if WHMCS has not made it yet;
+     * with a full cycle or more ahead it charges nothing and answers `current`. A lapsed term
+     * renews from today.
+     *
      * Services whose product is not Hub-mapped (one-time products, or anything created
      * outside the Hub) keep the original expiry re-sync behavior. An ended service is
      * refused by both.
@@ -317,27 +322,26 @@ class PartnerApiController
     {
         $orderId = $this->requestedOrderId($body);
         return $this->withServiceLock(function () use ($orderId): array {
-            $serviceId = (int) $this->liveServiceByOrder($orderId, 'renewed')->id;
+            $service = $this->liveServiceByOrder($orderId, 'renewed');
+            $serviceId = (int) $service->id;
 
             if (!$this->repo->isPartnerProductService($serviceId)) {
                 return $this->resyncExpiry($orderId, $serviceId);
             }
 
-            $invoiceId = $this->repo->outstandingRenewalInvoiceId($serviceId);
-            if ($invoiceId === null) {
-                throw new ApiException(
-                    'No renewal invoice is currently outstanding for this service. Renewal becomes '
-                    . 'available once WHMCS has generated the upcoming renewal invoice.',
-                    409
-                );
+            $months = RenewalPolicy::cycleMonths((string) $service->billingcycle);
+            if ($months > 0) {
+                $this->finishRestart($serviceId, $months);
+            }
+            $paidAhead = $months > 0
+                && RenewalPolicy::isPaidAhead((string) $this->repo->serviceNextDueDate($serviceId), date('Y-m-d'), $months);
+            if (!$paidAhead) {
+                $this->renewOneCycle($serviceId, $months);
             }
 
-            // In full or not at all: paying a Hosting renewal invoice is what triggers WHMCS's
-            // standard renewal (nextduedate advance + vpnhoodstore_Renew).
-            $this->processor()->settleInvoiceLocked($invoiceId);
-
             // Guarantee the token expiry matches the (now advanced) nextduedate, whether or
-            // not paying the invoice already ran vpnhoodstore_Renew. Idempotent either way.
+            // not paying the invoice already ran vpnhoodstore_Renew, and on `current` too.
+            // Idempotent either way.
             $model = \WHMCS\Service\Service::find($serviceId);
             if ($model) {
                 $result = Helper::renew(['model' => $model]);
@@ -348,10 +352,52 @@ class PartnerApiController
 
             return [
                 'upstreamOrderId' => $orderId,
-                'status'          => 'renewed',
+                'status'          => $paidAhead ? 'current' : 'renewed',
                 'nextDueDate'     => $this->repo->serviceNextDueDate($serviceId),
             ];
         });
+    }
+
+    /**
+     * Pay one cycle of a key with less than a full cycle left. The caller holds the credit lock.
+     *
+     * @throws ApiException
+     */
+    private function renewOneCycle(int $serviceId, int $months): void
+    {
+        $invoiceId = $this->repo->outstandingRenewalInvoiceId($serviceId);
+        if ($invoiceId === null && $months > 0) {
+            $invoiceId = $this->processor()->generateRenewalInvoiceLocked($serviceId);
+        }
+        if ($invoiceId === null) {
+            throw new ApiException('This order has no renewal: its product is not billed by cycle.', 409);
+        }
+
+        // In full or not at all: paying a Hosting renewal invoice is what triggers WHMCS's
+        // standard renewal (nextduedate advance + vpnhoodstore_Renew).
+        $this->processor()->settleInvoiceLocked($invoiceId);
+        if ($months > 0) {
+            $this->finishRestart($serviceId, $months);
+        }
+    }
+
+    /**
+     * A lapsed term renews from the day its renewal was paid (RenewalPolicy::restartedTermEnd),
+     * though WHMCS advanced it from its old due date. Read from the newest paid renewal, so a
+     * request that died between paying and this step is finished by the next one, not charged
+     * again. The caller holds the credit lock.
+     *
+     * @throws ApiException
+     */
+    private function finishRestart(int $serviceId, int $months): void
+    {
+        $renewal = $this->repo->lastPaidRenewal($serviceId);
+        $restartedEnd = $renewal !== null
+            ? RenewalPolicy::restartedTermEnd($renewal['periodStart'], $renewal['paidOn'], $months)
+            : null;
+        if ($restartedEnd !== null && (string) $this->repo->serviceNextDueDate($serviceId) < $restartedEnd) {
+            LocalApi::call('UpdateClientProduct', ['serviceid' => $serviceId, 'nextduedate' => $restartedEnd]);
+        }
     }
 
     /**
