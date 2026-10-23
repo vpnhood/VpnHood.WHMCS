@@ -5,7 +5,7 @@
 # current working tree.
 #
 # Usage:
-#   scripts/deploy-dev.sh [hub|partner|all]
+#   scripts/deploy-dev.sh [hub|partner|iap|all]
 #
 #   hub      (default) modules from THIS repo: vpnhoodstore, vpnhoodconfig,
 #            vpnhoodpartnerhub, plus the includes/hooks overlay
