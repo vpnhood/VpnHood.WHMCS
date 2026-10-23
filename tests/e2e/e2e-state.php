@@ -15,7 +15,10 @@
  * the address-confirmation token WHMCS mailed a new user; `drop-verify-clients`
  * removes every such client together with its orders and invoices.
  *
- * Usage: E2E_CLIENT_PASSWORD=… php e2e-state.php <clean|onetime-key|renewing|bulk|held-client|verify-token <email>|drop-verify-clients>
+ * `paid-key` places a real key paid by a transaction, for the admin Refund form;
+ * `service-state <id>` prints a service's status and whether its key is enabled.
+ *
+ * Usage: E2E_CLIENT_PASSWORD=… php e2e-state.php <clean|onetime-key|renewing|bulk|paid-key|service-state <id>|held-client|verify-token <email>|drop-verify-clients>
  */
 
 require '/home/whmcsdev/web/whmcs-dev.vpnhood.com/public_html/init.php';
@@ -232,6 +235,51 @@ switch ($scenario) {
             localAPI('DeleteClient', ['clientid' => (int) $id, 'deleteusers' => true]);
         }
         echo json_encode(['dropped' => count($ids)]) . "\n";
+        break;
+    case 'paid-key':
+        // a real key on an invoice paid by a transaction, which the admin Refund form can refund
+        $add = api('AddOrder', [
+            'clientid'       => $clientId,
+            'pid'            => [PID_ONETIME],
+            'billingcycle'   => ['onetime'],
+            'paymentmethod'  => 'banktransfer',
+            'noemail'        => true,
+            'noinvoiceemail' => true,
+        ]);
+        $invoiceId = (int) $add['invoiceid'];
+        $total = (string) Capsule::table('tblinvoices')->where('id', $invoiceId)->value('total');
+        api('AddInvoicePayment', [
+            'invoiceid' => $invoiceId,
+            'transid'   => "e2e-$invoiceId",
+            'gateway'   => 'banktransfer',
+            'amount'    => $total,
+            'noemail'   => true,
+        ]);
+        api('AcceptOrder', ['orderid' => (int) $add['orderid'], 'autosetup' => true, 'sendemail' => false]);
+        echo json_encode([
+            'clientId'  => $clientId,
+            'serviceId' => (int) explode(',', (string) $add['productids'])[0],
+            'invoiceId' => $invoiceId,
+            'total'     => $total,
+        ]) . "\n";
+        break;
+    case 'service-state':
+        // the service's WHMCS status and whether its key is enabled at the access manager
+        $serviceId = (int) ($argv[2] ?? 0);
+        $tokenId = (string) Capsule::table('tblcustomfieldsvalues as v')
+            ->join('tblcustomfields as f', 'f.id', '=', 'v.fieldid')
+            ->where('v.relid', $serviceId)
+            ->where('f.type', 'product')
+            ->whereRaw("SUBSTRING_INDEX(f.fieldname, '|', 1) = 'accessTokenId'")
+            ->value('v.value');
+        if ($tokenId === '') {
+            fail("service #$serviceId has no accessTokenId");
+        }
+        $token = json_decode((new ApiService())->getAccessCode($tokenId), true);
+        echo json_encode([
+            'status'     => (string) Capsule::table('tblhosting')->where('id', $serviceId)->value('domainstatus'),
+            'keyEnabled' => $token['accessToken']['isEnabled'] ?? null,
+        ]) . "\n";
         break;
     default:
         fail('unknown scenario: ' . $scenario);

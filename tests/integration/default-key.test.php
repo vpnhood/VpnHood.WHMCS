@@ -5,9 +5,10 @@
  *
  *   1. the buyer's FIRST key gets isDefaultKey=yes + accessCodeHash; a SECOND
  *      purchase never steals the default slot;
- *   2. the InvoiceRefunded hook terminates a FULLY refunded service by default —
- *      leaves a partially refunded one running, and deliberately keeps even a
- *      fully refunded one when keepOnRefund=yes is set.
+ *   2. the InvoiceRefunded hook terminates a FULLY refunded service unless the
+ *      Refund form's Reverse Payment box was left unticked — a refund from
+ *      outside the form revokes — and leaves a partially refunded one running.
+ *      The real form is driven by tests/e2e/refund.spec.mjs.
  *
  * ⚠ Places TWO real orders (real tokens at the access manager); both are
  * terminated and deleted in cleanup.
@@ -89,7 +90,7 @@ try {
         ? ok('each sale carries its own code hash')
         : bad('second sale hash wrong: ' . json_encode($hash2));
 
-    // -- 2. refund revokes by default; keepOnRefund keeps deliberately --------
+    // -- 2. refund revokes unless Reverse Payment is left unticked -----------
     require_once WEBROOT . '/includes/hooks/vpnhoodstore-refund-terminate.php';
 
     // a PARTIAL refund is the goodwill case (§8) and must never revoke — the bug
@@ -101,29 +102,38 @@ try {
         : bad('a partial refund terminated the service');
 
     // the rest of the money goes back: the partial becomes full → terminated.
-    // This is the AMOUNT signal — the invoice is still Paid, the sum is what tells.
+    // This is the AMOUNT signal — the invoice is still Paid, the sum is what tells —
+    // and no Refund form is in the request, so nobody chose to keep the key.
     refundInvoice($db, $first['invoice'], 1.0);
     vpnhoodstore_refundTerminateHook(['invoiceid' => $first['invoice']]);
     (one($db, 'SELECT domainstatus FROM tblhosting WHERE id=?', [$first['service']])['domainstatus'] ?? '?') === 'Terminated'
-        ? ok('refunds that add up to the invoice total revoke the key — money and service go back together')
+        ? ok('refunds from outside the Refund form that add up to the invoice total revoke the key')
         : bad('fully refunded service was not terminated');
 
-    // deliberate keep, on the other signal: WHMCS marks the invoice Refunded
-    $svc = \WHMCS\Service\Service::find($second['service']);
-    $svc->serviceProperties->save(['keepOnRefund' => 'yes']);
+    // deliberate keep: the Refund form's request as WHMCS 9.1 posts it, Reverse
+    // Payment unticked. The invoice is not marked Refunded here: UpdateInvoice would
+    // fire the hook inside localAPI, where $_POST is the API's parameters — a refund
+    // from outside the form. The real form's Refunded status is refund.spec.mjs's.
+    $_POST = ['sub' => 'refund', 'id' => (string)$second['invoice'], 'reverse' => '0'];
     refundInvoice($db, $second['invoice'], 1.0);
-    localAPI('UpdateInvoice', ['invoiceid' => $second['invoice'], 'status' => 'Refunded']);
     vpnhoodstore_refundTerminateHook(['invoiceid' => $second['invoice']]);
     (one($db, 'SELECT domainstatus FROM tblhosting WHERE id=?', [$second['service']])['domainstatus'] ?? '?') === 'Active'
-        ? ok('keepOnRefund=yes keeps the key running through a full refund (the deliberate choice)')
-        : bad('keepOnRefund was ignored');
+        ? ok('Reverse Payment unticked keeps the key running through a full refund (the deliberate choice)')
+        : bad('Reverse Payment unticked did not keep the key');
 
-    // …and without the mark, the Refunded status alone revokes it
-    $svc->serviceProperties->save(['keepOnRefund' => 'no']);
+    // the form of ANOTHER invoice's refund is no answer for this one
+    $_POST['id'] = (string)$first['invoice'];
+    vpnhoodstore_refundFormReverse($second['invoice']) === null
+        ? ok("another invoice's Refund form is no answer for this one")
+        : bad("another invoice's Refund form was read as this one's");
+
+    // …and ticked, the same refund revokes it
+    $_POST = ['sub' => 'refund', 'id' => (string)$second['invoice'], 'reverse' => '1'];
     vpnhoodstore_refundTerminateHook(['invoiceid' => $second['invoice']]);
+    $_POST = [];
     (one($db, 'SELECT domainstatus FROM tblhosting WHERE id=?', [$second['service']])['domainstatus'] ?? '?') === 'Terminated'
-        ? ok('an invoice WHMCS marked Refunded revokes the key on its own')
-        : bad('invoice marked Refunded did not revoke the key');
+        ? ok('Reverse Payment ticked revokes the key')
+        : bad('Reverse Payment ticked did not revoke the key');
 } catch (RuntimeException $e) {
     bad($e->getMessage());
 } finally {

@@ -2,7 +2,8 @@
 #
 # run-e2e.sh — browser (Playwright) tests for the hub store flows, against the
 # DEV WHMCS only: the checkout warning's three voices, the reseller CSV
-# delivery and the email-verification checkout hold. Uploads e2e-state.php to
+# delivery, the email-verification checkout hold and the admin Refund form's
+# Reverse Payment box. Uploads e2e-state.php to
 # the dev box (the specs drive scenarios
 # through it over SSH), installs Playwright on first run, and cleans up after.
 #
@@ -32,6 +33,8 @@ SSH=(ssh -i "$SSH_KEY" -o BatchMode=yes -o ConnectTimeout=15 "$SSH_HOST")
 SECRETS_OS="$(cygpath -w "$SECRETS" 2>/dev/null || echo "$SECRETS")"
 E2E_CLIENT_PASSWORD="$(python -c "import json,sys; print(json.load(open(sys.argv[1]))['testClientPassword'])" "$SECRETS_OS")"
 [ -n "$E2E_CLIENT_PASSWORD" ] || { echo "testClientPassword missing from secrets.json" >&2; exit 1; }
+E2E_ADMIN_USER="$(python -c "import json,sys; print(json.load(open(sys.argv[1])).get('adminUser', ''))" "$SECRETS_OS")"
+E2E_ADMIN_PASSWORD="$(python -c "import json,sys; print(json.load(open(sys.argv[1])).get('adminPassword', ''))" "$SECRETS_OS")"
 
 echo "== Uploading the scenario driver to the dev box"
 "${SSH[@]}" 'mkdir -p ~/tmp'
@@ -45,6 +48,7 @@ npx playwright install chromium
 echo "== Running the browser tests against $SITE_URL"
 rc=0
 E2E_SSH_KEY="$SSH_KEY" E2E_SSH_HOST="$SSH_HOST" E2E_CLIENT_PASSWORD="$E2E_CLIENT_PASSWORD" \
+  E2E_ADMIN_USER="$E2E_ADMIN_USER" E2E_ADMIN_PASSWORD="$E2E_ADMIN_PASSWORD" \
   WHMCS_DEV_URL="$SITE_URL" npx playwright test "$@" || rc=$?
 
 echo "== Final cleanup"

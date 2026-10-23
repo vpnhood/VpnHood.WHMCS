@@ -76,11 +76,14 @@ Global settings store (API Key, Project ID, reseller restriction settings) in
 ### `includes/hooks/` — the refund hooks
 Two `InvoiceRefunded` hooks, which ship with every hub install:
 
-- `vpnhoodstore-refund-terminate.php` — a FULL refund ends every `vpnhoodstore` service on the
-  invoice (lifecycle §8: the money and the service go back together); a partial refund keeps
-  the key, and `keepOnRefund=yes` on the service keeps it through a full one. "In full" is
-  `vpnhoodstore_isRefundedInFull()`: WHMCS marked the invoice Refunded, or the refunds booked
-  against it (`gateway_funds_out` rows) reach its total.
+- `vpnhoodstore-refund-terminate.php` — a FULL refund follows WHMCS's Refund form (lifecycle
+  §8): *Reverse Payment* ticked ends every `vpnhoodstore` service on the invoice, unticked keeps
+  them, and a refund from outside the form (a gateway callback, the API) ends them. The hook gets
+  only the invoice id but runs inside the form's request, so it reads the box from `$_POST`
+  (`sub=refund`, `id`, `reverse` 0/1); `tests/e2e/refund.spec.mjs` drives the real form, so a
+  WHMCS update that renames the field shows there. A partial refund always keeps the key. "In
+  full" is `vpnhoodstore_isRefundedInFull()`: WHMCS marked the invoice Refunded, or the refunds
+  booked against it (`gateway_funds_out` rows) reach its total.
 - `vpnhood-refund-memory.php` — a full refund of a website invoice (not the `vpnhoodiappay`
   gateway: a store refund is the store's decision and record) remembers the client's address as
   a one-way hash with the date, one row per address (`mod_vpnhood_refund_memory`), for the months

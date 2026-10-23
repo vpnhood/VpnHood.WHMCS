@@ -1,26 +1,28 @@
 <?php
 
 /**
- * VpnHood Store — a FULL refund revokes the key by default (lifecycle §8).
+ * VpnHood Store — a FULL refund follows the admin's Reverse Payment box (lifecycle §8).
  *
- * When an invoice is refunded in full, every vpnhoodstore service billed on it is
- * terminated, so the money and the service go back together. Two deliberate
- * exceptions, both straight out of §8:
+ * When an invoice is refunded in full, every vpnhoodstore service billed on it follows
+ * the answer on WHMCS's own Refund form:
  *
- *  - *Refund and keep* — the goodwill gesture: set the `keepOnRefund` service
- *    property to `yes` before refunding and the key is left running to its
+ *  - *Reverse Payment* ticked — the sale is undone: the service is terminated, so the
+ *    money and the service go back together.
+ *  - Unticked — *refund and keep*, the goodwill gesture: the key is left running to its
  *    original expiry, with the decision logged.
- *  - A PARTIAL refund never revokes. WHMCS fires InvoiceRefunded for EVERY refund
- *    transaction and hands the hook nothing but the invoice id, so the amount has
- *    to be read back here. §8 names a partial refund as the archetypal keep case
- *    (an apology on a sale that stands), and ending a customer's key over a few
- *    dollars handed back is exactly the "revoke by accident" this must not do.
- *    It is logged with the services it left running — silence would be its own
- *    accident, and the merchant can still revoke by hand.
+ *  - A refund that did not come from that form (a gateway callback, the API) revokes:
+ *    nobody chose to keep the service.
  *
- * A fully refunded RENEWAL invoice ends the whole service too, by design, not just the cycle
- * it paid for: winding `nextduedate` back to the last paid cycle would make WHMCS invoice the
- * refunded cycle again. *Refund and keep* is the way to leave such a service running.
+ * A PARTIAL refund never revokes, whatever the box says. WHMCS fires InvoiceRefunded for
+ * EVERY refund transaction and hands the hook nothing but the invoice id, so the amount has
+ * to be read back here. §8 names a partial refund as the archetypal keep case (an apology
+ * on a sale that stands), and ending a customer's key over a few dollars handed back is
+ * exactly the "revoke by accident" this must not do. It is logged with the services it left
+ * running — silence would be its own accident, and the merchant can still revoke by hand.
+ *
+ * Revoking a fully refunded RENEWAL invoice ends the whole service, by design, not just the
+ * cycle it paid for: winding `nextduedate` back to the last paid cycle would make WHMCS invoice
+ * the refunded cycle again. Leaving Reverse Payment unticked is the way to keep such a service.
  *
  * "In full" is vpnhoodstore_isRefundedInFull: WHMCS has marked the invoice Refunded,
  * or the refunds booked against it add up to its total. The refund memory
@@ -80,6 +82,25 @@ function vpnhoodstore_isRefundedInFull(int $invoiceId): bool
         || ($total > 0 && vpnhoodstore_refundedTotal($invoiceId) >= $total - 0.005);
 }
 
+/**
+ * The Refund form's Reverse Payment box for this invoice: true ticked, false unticked, null when
+ * the refund did not come from the form. WHMCS hands InvoiceRefunded nothing but the invoice id,
+ * but fires it inside the form's own request, so the box is read from that (seen on WHMCS 9.1:
+ * `sub=refund`, `id` the invoice, `reverse` a hidden 0 that the ticked box overrides with 1). A
+ * WHMCS that renames the field answers null, and the service is revoked rather than kept.
+ */
+function vpnhoodstore_refundFormReverse(int $invoiceId): ?bool
+{
+    if (($_POST['sub'] ?? null) !== 'refund' || (int) ($_POST['id'] ?? 0) !== $invoiceId) {
+        return null;
+    }
+    return match ($_POST['reverse'] ?? null) {
+        '1' => true,
+        '0' => false,
+        default => null,
+    };
+}
+
 /** Named (not a closure) so the integration test can drive it directly. */
 function vpnhoodstore_refundTerminateHook(array $vars): void
 {
@@ -127,21 +148,17 @@ function vpnhoodstore_refundTerminateHook(array $vars): void
             return;
         }
 
+        $reverse = vpnhoodstore_refundFormReverse($invoiceId);
         foreach ($candidates as $serviceId) {
-            $keep = Capsule::table('tblcustomfieldsvalues as v')
-                ->join('tblcustomfields as f', 'f.id', '=', 'v.fieldid')
-                ->where('v.relid', $serviceId)
-                ->where('f.type', 'product')
-                ->whereRaw("LOWER(SUBSTRING_INDEX(f.fieldname, '|', 1)) = 'keeponrefund'")
-                ->value('v.value');
-            if ((string) $keep === 'yes') {
+            if ($reverse === false) {
                 localAPI('LogActivity', ['description' =>
-                    "vpnhoodstore: invoice #{$invoiceId} refunded — service #{$serviceId} deliberately kept (keepOnRefund)."]);
+                    "vpnhoodstore: invoice #{$invoiceId} refunded in full — service #{$serviceId} kept (Reverse Payment not ticked)."]);
                 continue;
             }
+            $why = $reverse === true ? 'Reverse Payment ticked' : 'not refunded from the Refund form';
             $result = localAPI('ModuleTerminate', ['serviceid' => $serviceId]);
             localAPI('LogActivity', ['description' => ($result['result'] ?? '') === 'success'
-                ? "vpnhoodstore: invoice #{$invoiceId} refunded in full — service #{$serviceId} terminated (refund revokes by default)."
+                ? "vpnhoodstore: invoice #{$invoiceId} refunded in full — service #{$serviceId} terminated ({$why})."
                 : "vpnhoodstore: invoice #{$invoiceId} refunded but service #{$serviceId} could NOT be terminated — revoke it by hand."]);
         }
     } catch (\Throwable $e) {
