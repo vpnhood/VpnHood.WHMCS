@@ -4,7 +4,8 @@ Guidance for working in this repository.
 
 ## What this is
 
-WHMCS integration for **VpnHood** VPN. Two integration models live across two repos:
+WHMCS integration for **VpnHood** VPN. Two integration models live across two repos, plus the
+in-app purchase addon this repo's release bundles:
 
 - **VpnHood.WHMCS** (this repo) — runs on **our** WHMCS:
   - `vpnhoodstore` — provisions access tokens directly against the VpnHood access server.
@@ -14,6 +15,8 @@ WHMCS integration for **VpnHood** VPN. Two integration models live across two re
   - `vpnhoodverify` — forces client-area email verification (WHMCS's own setting only
     mails the link; it blocks nothing).
 - **VpnHood.WHMCS.Partner** (separate repo) — the connector partners install on their own WHMCS.
+- **VpnHood.WHMCS.Iap** (separate repo) — the `vpnhoodiap` addon (app-store purchases → WHMCS
+  orders). The release package bundles it **verbatim**, at the release pinned in `IAP_VERSION`.
 
 ## Read this first
 
@@ -24,18 +27,10 @@ when you change architecture, the DB schema, or the API.
 
 ## Key rules
 
-- **Reuse, don't duplicate provisioning.** Access-server calls go through
-  `modules/servers/vpnhoodstore/lib/ApiService.php` and `Helper.php`. `vpnhoodpartnerhub`
-  must call these, never re-implement access-server logic.
-- **Native credit is the source of truth.** Do not build a custom credit ledger; partner
-  spend is the WHMCS client credit (`tblclients.credit`). Never provision an unpaid order.
-- **Scope every partner action** to `partner.client_id`; never trust ids from the request.
-- **Hub API is a cross-repo contract.** If you change the action set or payloads, update the
-  matching docs in the **VpnHood.WHMCS.Partner** repo in the same change, or the connector breaks.
 - **Folder naming:** lowercase letters/numbers only (no underscores/spaces).
 - **Never hand-edit a module's version.** The root `VERSION` file is the single source of
-  truth; `scripts/set-version.sh` stamps it into every module. CI bumps it on every push to
-  main — see "Versioning & releases" in `docs/ARCHITECTURE.md`.
+  truth; `scripts/set-version.sh` stamps it into every module. The release workflow bumps it
+  when run by hand — see "Versioning & releases" in `docs/ARCHITECTURE.md`.
 - **Bump the version for ANY change to a module's files** — templates, hooks, a comment —
   not only schema or DB changes. WHMCS decides what to reinstall by comparing the stamped
   version, so an edit that ships under an unchanged number is an edit that silently does
@@ -51,8 +46,9 @@ Production code (what gets deployed to a WHMCS) lives ONLY under `modules/` and
 mix test/dev files into the production tree:
 
 - `VERSION` + `scripts/set-version.sh` — the repo version and the script that stamps it into
-  every module. `.github/workflows/release.yml` bumps, tags and releases on push to main.
-- `scripts/` — dev tooling. `scripts/deploy-dev.sh [hub|partner|all]` publishes the
+  every module. `.github/workflows/release.yml`, run by hand, bumps, tags and releases.
+- `IAP_VERSION` — the `vpnhoodiap` release the package bundles.
+- `scripts/` — dev tooling. `scripts/deploy-dev.sh [hub|partner|iap|all]` publishes the
   modules to the dev WHMCS (staged upload + md5 verify + server-side `php -l` + API
   smoke check). It deploys only `modules/` and `includes/hooks`, so test files can
   never reach the server.
@@ -76,3 +72,13 @@ mix test/dev files into the production tree:
 - Wholesale gateway: `modules/addons/vpnhoodpartnerhub/` (+ its `README.md` for the API)
 - Forced email verification: `modules/addons/vpnhoodverify/` (+ its `README.md`)
 - Developer guide: `docs/ARCHITECTURE.md`
+
+## Area rules
+
+Loaded automatically by file path. When a task touches an area before any of its files has been
+opened (a question, a plan), read the rule file first. A new rule for one area goes into its rule
+file.
+
+- [.claude/rules/partner-hub.md](.claude/rules/partner-hub.md) — the Partner Hub's rules: reuse
+  `vpnhoodstore`'s provisioning, native credit only, scope to `partner.client_id`, the hub API
+  as a cross-repo contract.
