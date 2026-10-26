@@ -28,12 +28,11 @@
 #                        The keyless orders are terminated at the end; the keyed one is left
 #                        ACTIVE unless HUB_RUN_TERMINATE=1.
 #   HUB_RUN_SUSPEND=1    Also exercise suspend -> unsuspend on the keyed order (opt-in).
-#   HUB_RUN_RENEW=1      Also exercise renew on the keyed order (opt-in).
 #   HUB_RUN_TERMINATE=1  Also terminate the keyed order at the end (opt-in), then prove its key
 #                        is spent (409) while a new key buys a new order, terminated too.
 #
-# Renewal, suspension, and termination are separate, opt-in jobs — none of them
-# run unless you explicitly ask for them via the flags above.
+# Suspension and termination are separate, opt-in jobs — neither runs unless you explicitly ask
+# for it via the flags above. renew is covered by renew-term.test.sh.
 #
 # Usage:
 #   cp .env.example .env && edit .env
@@ -179,19 +178,6 @@ if [ "${HUB_RUN_PROVISION:-0}" = "1" ]; then
       call "{\"action\":\"unsuspend\",\"upstreamOrderId\":$OID}";   assert "unsuspend -> 200"     200 'active'
     else
       echo "(suspend/unsuspend skipped — set HUB_RUN_SUSPEND=1 to include)"
-    fi
-
-    if [ "${HUB_RUN_RENEW:-0}" = "1" ]; then
-      echo "== Renew (order #$OID, opt-in) =="
-      # Manual renewal: 409 is the expected result when no renewal invoice is outstanding yet.
-      call "{\"action\":\"renew\",\"upstreamOrderId\":$OID}"
-      if [ "$CODE" = "409" ]; then
-        assert "renew -> 409 (nothing due yet)" 409 'No renewal invoice'
-      else
-        assert "renew -> 200" 200 'renewed'
-      fi
-    else
-      echo "(renew skipped — set HUB_RUN_RENEW=1 to include)"
     fi
   fi
 

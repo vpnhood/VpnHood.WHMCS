@@ -228,11 +228,10 @@ hard-coded in the script or committed.
     refuses another order for the same key and another key for the same order; the linked key
     replays it; `confirmNewPurchase` buys; after they are terminated, the key is `key_spent`.
     These orders are always terminated at the end.
-- **Lifecycle jobs** — renewal, suspension, and termination are separate,
-  opt-in jobs layered on top of a provisioning run; none of them run unless
-  you ask for them explicitly:
+- **Lifecycle jobs** — suspension and termination are separate, opt-in jobs layered on top of a
+  provisioning run; neither runs unless you ask for it explicitly (`renew` is covered by
+  `renew-term.test.sh`):
   - `HUB_RUN_SUSPEND=1` — `suspend` → (a suspended keyed order still replays) → `unsuspend`
-  - `HUB_RUN_RENEW=1` — `renew` (expects 409 if no renewal invoice is due yet)
   - `HUB_RUN_TERMINATE=1` — `terminate`; then the key is `key_spent`, and a new key buys a
     replacement, terminated too
 
