@@ -170,9 +170,10 @@ order, already below, sends nothing; a top-up (`AddCredit`) back to exactly the 
 again; a `renew` that crosses it sends too; with mail made 10 s slower (a dev-only hook,
 `hooks/vhtest-slow-mail.php`, installed and removed around the run) the order still answers
 first; with the template renamed the order goes through, no email is sent, and the activity log
-says so. Needs the template on the dev WHMCS (the addon `README.md`, *Low-credit alert*, creates
-it once). The rules themselves (which payment crosses, how the setting reads) are unit-tested
-without WHMCS: `tests/unit/run.sh`.
+says so. It first runs the addon `README.md`'s one-time template command (*Low-credit alert*),
+read from the README itself, so the documented step is checked too: a no-op on dev, where the
+template exists. The rules themselves (which payment crosses, how the setting reads) are
+unit-tested without WHMCS: `tests/unit/run.sh`.
 
 ⚠ Spends reseller (test) credit, tops it up once and provisions real tokens; every key is
 terminated at the end. The setting and the template's name are restored in a `finally`.

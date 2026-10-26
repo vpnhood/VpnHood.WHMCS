@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 #
 # low-credit-alert.test.sh — the low-credit email (low-credit-alert.test.php) on the dev box, over the
-# real Hub API as the test partner (.env). Installs a dev-only hook (hooks/vhtest-slow-mail.php) into
-# includes/hooks for the slow-mail step and removes it again.
+# real Hub API as the test partner (.env). First runs the addon README's one-time template command,
+# read from the README itself (a no-op where the template exists). Installs a dev-only hook
+# (hooks/vhtest-slow-mail.php) into includes/hooks for the slow-mail step and removes it again.
 #
 # ⚠ Spends reseller (test) credit, tops it up once and provisions real tokens; every key is
 #   terminated at the end.
@@ -33,6 +34,14 @@ cleanup() {
   "${SSH[@]}" "rm -f '$HOOK' ~/tmp/vhtest-slow-mail; rm -rf ~/tmp/low-credit-alert.test.php ~/tmp/lib" || true
 }
 trap cleanup EXIT
+
+# The README's command, exactly as written there: an install that loads the Hub's hooks has the class
+# already when init.php returns.
+TEMPLATE_CMD="$(grep -m1 'LowCreditAlert::createTemplate' "$REPO_ROOT/modules/addons/vpnhoodpartnerhub/README.md" | sed 's/^ *//')"
+[ -n "$TEMPLATE_CMD" ] || { echo "the README's template command is missing" >&2; exit 1; }
+echo "== The README's one-time template command"
+"${SSH[@]}" "cd '$WEBROOT' && $TEMPLATE_CMD" || { echo "FAIL the README's template command" >&2; exit 1; }
+echo "PASS the README's template command"
 
 echo "== Running low-credit-alert test on the dev box"
 "${SSH[@]}" 'mkdir -p ~/tmp/lib'

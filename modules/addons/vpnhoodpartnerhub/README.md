@@ -280,7 +280,7 @@ outside the Hub, such as an invoice paid in the client area, sends nothing.
   from the WHMCS root directory:
 
   ```bash
-  php -r 'require "init.php"; require "modules/addons/vpnhoodpartnerhub/lib/LowCreditAlert.php"; WHMCS\Module\Addon\VpnHoodPartnerHub\LowCreditAlert::createTemplate();'
+  php -r 'require "init.php"; require_once "modules/addons/vpnhoodpartnerhub/lib/LowCreditAlert.php"; WHMCS\Module\Addon\VpnHoodPartnerHub\LowCreditAlert::createTemplate();'
   ```
 
 ## Safety model
