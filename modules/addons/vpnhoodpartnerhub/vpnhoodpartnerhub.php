@@ -26,6 +26,7 @@ require_once __DIR__ . '/lib/ApiException.php';
 require_once __DIR__ . '/lib/PartnerRepository.php';
 require_once __DIR__ . '/lib/PartnerApiController.php';
 
+use WHMCS\Module\Addon\VpnHoodPartnerHub\LowCreditAlert;
 use WHMCS\Module\Addon\VpnHoodPartnerHub\PartnerRepository;
 use WHMCS\Module\Addon\VpnHoodPartnerHub\PurchaseProcessor;
 use WHMCS\Module\Addon\VpnHoodPartnerHub\PurchaseRepository;
@@ -75,13 +76,21 @@ function vpnhoodpartnerhub_config(): array
                 'Description'  => 'Days the partner API log keeps each call: the partner\'s address, the request and the answer, delivered keys included. The daily cleanup deletes older calls.',
                 'Default'      => '90',
             ],
+            'LowCreditThreshold' => [
+                'FriendlyName' => 'Low Credit Alert Threshold',
+                'Type'         => 'text',
+                'Size'         => '8',
+                'Description'  => 'When a Hub order or renewal takes a partner\'s credit below this amount (in the partner\'s currency), the partner gets the "' . LowCreditAlert::TEMPLATE . '" email, once: the next one only after their credit has been back at or above it. 0 turns the alert off.',
+                'Default'      => '100',
+            ],
         ],
     ];
 }
 
 /**
- * Create database tables on activation, each in its current shape. The Hub has no upgrade
- * step: a change an existing install needs is made there by hand.
+ * Create the database tables and the low-credit email template on activation, each in its
+ * current shape. The Hub has no upgrade step: a change an existing install needs is made there
+ * by hand.
  */
 function vpnhoodpartnerhub_activate(): array
 {
@@ -128,10 +137,11 @@ function vpnhoodpartnerhub_activate(): array
         }
 
         (new PurchaseRepository())->createTable();
+        LowCreditAlert::createTemplate();
 
         return [
             'status'      => 'success',
-            'description' => 'VpnHood Partner Hub tables created successfully.',
+            'description' => 'VpnHood Partner Hub tables and email template created successfully.',
         ];
     } catch (\Throwable $e) {
         return [

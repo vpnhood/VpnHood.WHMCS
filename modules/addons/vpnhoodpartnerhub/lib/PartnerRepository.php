@@ -4,6 +4,7 @@ namespace WHMCS\Module\Addon\VpnHoodPartnerHub;
 
 use WHMCS\Database\Capsule;
 
+require_once __DIR__ . '/LowCreditAlert.php';
 require_once __DIR__ . '/RefundPolicy.php';
 
 /**
@@ -32,6 +33,7 @@ class PartnerRepository
             // blank or not a whole number keeps the default rather than emptying the log
             'logRetentionDays'   => ctype_digit(trim((string) ($rows['PartnerLogRetentionDays'] ?? '')))
                 ? max(1, (int) $rows['PartnerLogRetentionDays']) : self::DEFAULT_LOG_RETENTION_DAYS,
+            'lowCreditThreshold' => LowCreditAlert::threshold($rows['LowCreditThreshold'] ?? null),
         ];
     }
 

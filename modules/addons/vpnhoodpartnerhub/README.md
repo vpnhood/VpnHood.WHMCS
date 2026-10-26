@@ -22,7 +22,8 @@ provisioning (the existing `vpnhoodstore` / `Helper` / `ApiService` do that).
 1. Copy `modules/addons/vpnhoodpartnerhub/` into your WHMCS `/modules/addons/`.
 2. **System Settings → Addon Modules → VpnHood! Partner Hub → Activate**. Activation
    creates the tables `mod_vpnhood_partners`, `mod_vpnhood_partner_products`,
-   `mod_vpnhood_partner_log` and `mod_vpnhood_partner_purchases`. **Deactivating preserves partner data** (partners keep their
+   `mod_vpnhood_partner_log` and `mod_vpnhood_partner_purchases`, and the email template of the
+   *Low-credit alert*. **Deactivating preserves partner data** (partners keep their
    API credentials across a deactivate/reactivate); to remove the module's data
    permanently, drop those tables manually.
 
@@ -42,6 +43,8 @@ provisioning (the existing `vpnhoodstore` / `Helper` / `ApiService` do that).
    **Partner Refund Window (days)**: how long after payment a partner can refund a new key
    through the API (default 7; `0` turns partner refunds off; see *Refunds*). Set **API Log
    Retention (days)**: how long the partner API log keeps each call (default 90; see *Audit*).
+   Set **Low Credit Alert Threshold**: the credit below which a partner is emailed (default 100;
+   `0` turns it off; see *Low-credit alert*).
 
    The field reports the state of the current value in its own description on the
    configuration screen, including immediately after **Save Changes**: green when the value
@@ -68,8 +71,9 @@ provisioning (the existing `vpnhoodstore` / `Helper` / `ApiService` do that).
    products in this list. The billing cycle is derived automatically from the product's
    own pricing, and the product's WHMCS id is used as its `downstreamRef` in the API.
 
-Each partner order creates a **recurring service** on the partner's client account, so
-WHMCS invoices and charges their credit every cycle automatically.
+Each partner order creates a service on the partner's client account. WHMCS invoices a
+recurring one every cycle, but the invoice is paid from the partner's credit only when the
+connector calls `renew` (see *Renewals are manual*).
 
 ## API
 
@@ -255,6 +259,29 @@ way credit comes back through the API.
 
 Every refund is written to the WHMCS activity log. Your own admin can still refund anything by
 hand in WHMCS, renewals included; the window binds only the API.
+
+## Low-credit alert
+
+A partner is emailed when an order or `renew` takes their credit below the **Low Credit Alert
+Threshold** (100 while unset, in their own currency; `0` turns it off). Once: the payments after
+it start below the threshold and send nothing, so the next email waits until a top-up has
+brought the credit back to the threshold and a payment takes it below again. Credit spent
+outside the Hub, such as an invoice paid in the client area, sends nothing.
+
+- **The email** is the General template **VpnHood Partner Low Credit** (Email Templates). Edit
+  its wording there: `{$low_credit_balance}` is the credit after the payment and
+  `{$low_credit_threshold}` the threshold, both in the partner's currency.
+- **It does not slow the order down** where PHP runs as PHP-FPM: it goes out after the API has
+  answered. Under other PHP setups it goes out at the end of the request, before the answer
+  completes.
+- **Each alert writes an activity-log line** on the partner's client, saying whether the email
+  was sent, and why not when it was not (a missing template, a mail failure).
+- **An install that activated the Hub before it had this alert** creates the template once,
+  from the WHMCS root directory:
+
+  ```bash
+  php -r 'require "init.php"; require "modules/addons/vpnhoodpartnerhub/lib/LowCreditAlert.php"; WHMCS\Module\Addon\VpnHoodPartnerHub\LowCreditAlert::createTemplate();'
+  ```
 
 ## Safety model
 

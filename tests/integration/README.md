@@ -160,6 +160,23 @@ themselves (`RenewalPolicy`) are unit-tested without WHMCS, month ends included:
 
 ⚠ Spends reseller (test) credit and provisions one real token, terminated at the end.
 
+## low-credit-alert.test.sh — the low-credit email
+
+**`low-credit-alert.test.sh`** — keyed orders over the real Hub API as the test partner (`.env`):
+the Hub reads 100 while `LowCreditThreshold` was never saved; at `0` an order sends nothing; with
+it set just under the credit, the order that takes the credit below it sends one email to the
+partner's client, naming the balance and the threshold, and one activity-log line; the next
+order, already below, sends nothing; a top-up (`AddCredit`) back to exactly the threshold arms it
+again; a `renew` that crosses it sends too; with mail made 10 s slower (a dev-only hook,
+`hooks/vhtest-slow-mail.php`, installed and removed around the run) the order still answers
+first; with the template renamed the order goes through, no email is sent, and the activity log
+says so. Needs the template on the dev WHMCS (the addon `README.md`, *Low-credit alert*, creates
+it once). The rules themselves (which payment crosses, how the setting reads) are unit-tested
+without WHMCS: `tests/unit/run.sh`.
+
+⚠ Spends reseller (test) credit, tops it up once and provisions real tokens; every key is
+terminated at the end. The setting and the template's name are restored in a `finally`.
+
 ## hub-api.test.sh — Hub API black-box test
 
 A black-box smoke test for the `vpnhoodpartnerhub` API. It drives the live HTTP

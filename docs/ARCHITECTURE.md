@@ -151,6 +151,9 @@ a secured API; it does not own credit or provisioning.**
 - `lib/RefundPolicy.php` — whether an order may be refunded through the API, decided from facts
   the caller reads; no database, so `tests/unit` checks every rule (see *Service actions and
   refunds*).
+- `lib/LowCreditAlert.php` — the low-credit email (the addon `README.md`, *Low-credit alert*):
+  which payment crosses the threshold (unit-tested in `tests/unit`), its template, and its send
+  at the end of the request.
 - `lib/PartnerRepository.php` — data access + native credit reads.
 - `lib/LocalApi.php` — `localAPI` with failures turned into readable 422s (see below).
 - `lib/ApiException.php` — carries an HTTP status, and optionally a machine-readable `code`
@@ -158,7 +161,8 @@ a secured API; it does not own credit or provisioning.**
 
 ## Data model (Partner Hub)
 
-Created by `vpnhoodpartnerhub_activate()`:
+Created by `vpnhoodpartnerhub_activate()`, besides the General email template of the low-credit
+alert (`LowCreditAlert::createTemplate`, run by hand on an install activated before it):
 
 ```
 mod_vpnhood_partners
@@ -233,7 +237,9 @@ midway drops the table so the next activation starts over.
       verify the order is gone or cancelled, the invoice cancelled with no gateway payment, and
       the credit equal to its value under the lock → `rolled_back` (the key is free again) and
       `402`; anything else → `needs_reconciliation` and `409`. Applied but not Paid, or a
-      negative balance → `needs_reconciliation`.
+      negative balance → `needs_reconciliation`. A payment that takes the credit below the
+      *Low Credit Alert Threshold* emails the partner once, after the answer under PHP-FPM
+      (`LowCreditAlert`); renewals pay through the same `applyCredit`, so they alert too.
    3. **Provisioning** → `provisioned` when the service is Active or Suspended with its delivery
       footprint: `accessTokenId` (normal delivery) or the `bulkDelivery` mark (CSV — a product
       configured for CSV delivers a batch even at quantity 1). **There is exactly one attempt.**
@@ -627,9 +633,9 @@ The integration suites in `tests/integration/` run against the dev WHMCS (see it
 `connector-idempotency.test.sh` (the connector's side, and both directions of compatibility
 with the previous releases), `refund.test.sh` (refunds, the service-action lock and the ended
 guards, the connector's Refund button), `refund-memory.test.sh` (the refund memory and its
-warning), plus the buyer lifecycle scripts. `tests/unit/run.sh`
-runs the unit tests (pure PHP, e.g. `RefundPolicy`) with the dev box's PHP, since there is none
-locally. By hand, against a live WHMCS:
+warning), `low-credit-alert.test.sh` (the low-credit email), plus the buyer lifecycle scripts.
+`tests/unit/run.sh` runs the unit tests (pure PHP, e.g. `RefundPolicy`) with the dev box's PHP,
+since there is none locally. By hand, against a live WHMCS:
 
 1. Activate `vpnhoodpartnerhub`; confirm the four tables exist.
 2. Create a partner linked to a WHMCS client, add credit, map a product.

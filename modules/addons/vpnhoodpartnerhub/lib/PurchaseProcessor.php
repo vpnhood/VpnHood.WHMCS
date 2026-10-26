@@ -6,6 +6,7 @@ use WHMCS\Database\Capsule;
 use WHMCS\Module\Server\VpnHoodStore\ApiService;
 use WHMCS\Module\Server\VpnHoodStore\Helper;
 
+require_once __DIR__ . '/LowCreditAlert.php';
 require_once __DIR__ . '/RefundPolicy.php';
 
 /**
@@ -975,15 +976,19 @@ class PurchaseProcessor
         }
     }
 
+    /** Every Hub payment from credit, an order's or a renewal's, under the client's credit lock. */
     private function applyCredit(int $invoiceId, int $clientId, float $amount): void
     {
         require_once ROOTDIR . '/includes/invoicefunctions.php';
         if (!function_exists('applyCredit')) {
             throw new \RuntimeException('WHMCS credit application is unavailable on this install.');
         }
+        $before = $this->repo->getClientCredit($clientId);
         // (invoiceId, userId, amount, noEmail): applies exactly this amount. WHMCS 9 records it
         // as a payment through a credit note, so invoiceBalance() sees it.
         applyCredit($invoiceId, $clientId, $amount, true);
+        LowCreditAlert::afterPayment($clientId, $before, $this->repo->getClientCredit($clientId),
+            $this->repo->settings()['lowCreditThreshold']);
     }
 
     /**
