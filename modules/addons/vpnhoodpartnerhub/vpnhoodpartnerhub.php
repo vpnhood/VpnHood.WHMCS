@@ -39,7 +39,7 @@ function vpnhoodpartnerhub_config(): array
     return [
         'name'        => 'VpnHood! Partner Hub',
         'description' => 'Wholesale partner gateway: lets external partner WHMCS installs order and provision VpnHood keys against this WHMCS using the partner\'s native credit balance.',
-        'version'     => '1.2.27',
+        'version'     => '1.2.28',
         'author'      => 'VpnHood',
         'fields'      => [
             'RequireIpAllowlist' => [
