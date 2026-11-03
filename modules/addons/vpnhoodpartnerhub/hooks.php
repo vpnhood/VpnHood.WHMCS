@@ -9,6 +9,7 @@ require_once __DIR__ . '/lib/PartnerRepository.php';
 use WHMCS\Database\Capsule;
 use WHMCS\Module\Addon\VpnHoodPartnerHub\LocalApi;
 use WHMCS\Module\Addon\VpnHoodPartnerHub\PartnerRepository;
+use WHMCS\Module\Addon\VpnHoodPartnerHub\PurchaseRepository;
 use WHMCS\Module\Addon\VpnHoodPartnerHub\RenewalPolicy;
 
 /** DailyCronJob: the partner API log keeps the days PartnerLogRetentionDays names (90 while unset). */
@@ -55,6 +56,32 @@ function vpnhoodpartnerhub_start_term(array $vars): array
 }
 
 add_hook('PreModuleCreate', 1, 'vpnhoodpartnerhub_start_term');
+
+/**
+ * EmailPreSend: no payment reminder or overdue notice for the invoice of a purchase the Hub has
+ * not finished (PurchaseRepository::isUnfinishedPurchaseInvoice). It would ask the partner to pay
+ * what the Hub pays from their credit, or what support is cancelling. WHMCS still cancels the
+ * invoice once it is overdue, which Release accepts. Renewal invoices, which no purchase names,
+ * mail as before ("Renewals" in docs/ARCHITECTURE.md). For these templates relid is the invoice
+ * id. A failed check sends the mail, as WHMCS would.
+ */
+function vpnhoodpartnerhub_hold_payment_reminder(array $vars): array
+{
+    $reminders = ['Invoice Payment Reminder', 'First Invoice Overdue Notice', 'Second Invoice Overdue Notice', 'Third Invoice Overdue Notice'];
+    $invoiceId = (int) ($vars['relid'] ?? 0);
+    if ($invoiceId <= 0 || !in_array((string) ($vars['messagename'] ?? ''), $reminders, true)) {
+        return [];
+    }
+    try {
+        require_once __DIR__ . '/lib/PurchaseRepository.php';
+        return (new PurchaseRepository())->isUnfinishedPurchaseInvoice($invoiceId) ? ['abortsend' => true] : [];
+    } catch (\Throwable $e) {
+        logActivity("VpnHood! Partner Hub: '{$vars['messagename']}' of invoice #{$invoiceId} was sent unchecked: " . $e->getMessage());
+        return [];
+    }
+}
+
+add_hook('EmailPreSend', 1, 'vpnhoodpartnerhub_hold_payment_reminder');
 
 /**
  * An update takes effect without an admin: WHMCS records an addon's new version only when an

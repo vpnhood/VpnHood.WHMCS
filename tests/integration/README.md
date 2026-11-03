@@ -184,6 +184,16 @@ unit-tested without WHMCS: `tests/unit/run.sh`.
 ⚠ Spends reseller (test) credit, tops it up once and provisions real tokens; every key is
 terminated at the end. The setting and the template's name are restored in a `finally`.
 
+## payment-reminder.test.sh — no payment reminder for an unfinished purchase
+
+**`payment-reminder.test.sh`** — WHMCS's *Invoice Payment Reminder* and its three overdue
+notices, checked through `EmailPreSend` as WHMCS's sending runs it, for a real Unpaid invoice of
+the test reseller: they go while no purchase names it; they are held while a parked purchase
+(`needs_reconciliation`) or one a repeat resumes (`ordered`) names it, and a `SendEmail` of the
+overdue notice is aborted with nothing mailed; delivered, they go again. The invoice's other
+mail always goes. Places no order and spends no credit; the invoice is left Cancelled and the
+purchase row removed.
+
 ## hub-api.test.sh — Hub API black-box test
 
 A black-box smoke test for the `vpnhoodpartnerhub` API. It drives the live HTTP

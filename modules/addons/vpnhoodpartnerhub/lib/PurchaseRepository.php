@@ -249,6 +249,18 @@ class PurchaseRepository
         return array_map(fn ($r) => (array) $r, $query->get()->all());
     }
 
+    /**
+     * Whether a purchase the Hub has not finished names this invoice: one waiting for a person
+     * (needs_reconciliation) or for the repeat that resumes it. The Hub pays its orders' invoices
+     * from credit itself, so such an invoice is never the partner's to pay.
+     */
+    public function isUnfinishedPurchaseInvoice(int $invoiceId): bool
+    {
+        return Capsule::table(self::TABLE)->where('invoice_id', $invoiceId)
+            ->whereIn('state', array_merge(self::IN_FLIGHT, [self::NEEDS_RECONCILIATION]))
+            ->exists();
+    }
+
     // -- Footprints -------------------------------------------------------------
 
     /** The marker field of a product, created on first use (admin-only, so clients never see it). */

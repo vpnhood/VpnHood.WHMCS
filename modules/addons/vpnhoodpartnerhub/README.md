@@ -333,6 +333,10 @@ An order WHMCS's `AddOrder` failed to finish — it can stop after creating the 
 invoice — never reaches this list when nothing of it was paid: the Hub removes it and orders
 again. It is listed, with its order, invoice and service, only when it was touched.
 
+While a purchase is unfinished, WHMCS sends the partner no payment reminder or overdue notice
+for its invoice: the Hub pays it from credit, never the partner. WHMCS's overdue cancellation
+still cancels the invoice once it is overdue, and **Release** accepts a cancelled one.
+
 **Paid but not provisioned** is fixed on the service itself, and the page spells out the
 procedure: establish what the original token creation did before anything creates a token
 again — the tokens the access server lists for this customer and order, and, when it lists

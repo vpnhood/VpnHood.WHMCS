@@ -155,6 +155,9 @@ a secured API; it does not own credit or provisioning.**
   attention).
 - `api.php` — public POST/JSON endpoint. Bootstraps WHMCS via `init.php`, authenticates,
   dispatches, logs; sends `X-Vpnhood-Hub-Features` on every response.
+- `hooks.php` — the daily API-log prune, a recurring key's first-term day (`PreModuleCreate`,
+  see *Renewals*), no payment reminder for an unfinished purchase's invoice (`EmailPreSend`, see
+  *Purchases needing attention*), and the cron's catch-up on an unrecorded upgrade.
 - `lib/Auth.php` — key/secret auth (`X-Vpnhood-Key` / `X-Vpnhood-Secret`), status + IP gating.
 - `lib/PartnerApiController.php` — the actions: request validation and dispatch.
 - `lib/PurchaseProcessor.php` — ordering as a sequence of confirmed steps: `AddOrder`,
@@ -322,6 +325,16 @@ still-Pending order with `autosetup` off; **Release** closes an unfinished purch
 live order of the client placed while the purchase was ordering that no purchase accounts for —
 never waived — and no payment remains, or the admin confirms its refund. Neither orders, pays or
 provisions.
+
+**No payment reminder while a purchase is unfinished.** The addon's `EmailPreSend` hook
+(`vpnhoodpartnerhub_hold_payment_reminder`) stops WHMCS's *Invoice Payment Reminder* and its
+three *Invoice Overdue Notice*s for an invoice that a purchase in `needs_reconciliation`, or still
+in a step, names (`PurchaseRepository::isUnfinishedPurchaseInvoice`). The Hub pays its orders'
+invoices from credit, so the notice would ask the partner to pay what the Hub pays, or what
+support is cancelling. The invoice still goes overdue, and *Overdue Invoice Cancellations*
+cancels it, which Release accepts.
+Renewal invoices, which no purchase names, mail as standard (*Renewals*), and every other invoice
+mail goes. A failed check sends the mail and logs why.
 
 **Paid but not provisioned — the support procedure** (also on that page). Create may run again
 only after a confirmed failure *before* token creation, or confirmation that the creation
@@ -666,7 +679,8 @@ The integration suites in `tests/integration/` run against the dev WHMCS (see it
 `connector-idempotency.test.sh` (the connector's side, and both directions of compatibility
 with the previous releases), `refund.test.sh` (refunds, the service-action lock and the ended
 guards, the connector's Refund button), `refund-memory.test.sh` (the refund memory and its
-warning), `low-credit-alert.test.sh` (the low-credit email), `ticket-ip.test.sh` (Clear Ticket IP
+warning), `low-credit-alert.test.sh` (the low-credit email), `payment-reminder.test.sh` (no
+payment reminder for an unfinished purchase's invoice), `ticket-ip.test.sh` (Clear Ticket IP
 Addresses), plus the buyer lifecycle scripts.
 `tests/unit/run.sh` runs the unit tests (pure PHP, e.g. `RefundPolicy`) with the dev box's PHP,
 since there is none locally. By hand, against a live WHMCS:
