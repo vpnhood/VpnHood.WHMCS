@@ -101,9 +101,11 @@ the client and in the admin area, and keeps one on each ticket rating (`tblticke
 no WHMCS setting turns it off. With **Clear Ticket IP Addresses** on in VpnHood! MANAGER
 Configuration (off while unset), `TicketOpen` and `TicketOpenAdmin` clear the new ticket's IP, and
 the daily cron clears what is left: ratings, which no hook announces, and tickets stored before.
-No localAPI command writes either column, so both are written directly. Covered by
-`tests/integration/ticket-ip.test.sh` (the hooks and the daily run) and
-`tests/e2e/ticket-ip.spec.mjs` (a ticket opened from the client area, where WHMCS records the IP).
+No localAPI command writes either column, so both are written directly. The partner connector
+carries the same option in its config addon's `hooks.php`, under its own function names, as an
+install can run both packages. Covered by `tests/integration/ticket-ip.test.sh` (both packages'
+hooks and daily runs) and `tests/e2e/ticket-ip.spec.mjs` (a ticket opened from the client area,
+where WHMCS records the IP).
 
 ### `modules/addons/vpnhoodverify/` (addon) — forced email verification
 Makes email verification mandatory for the client area. WHMCS's own
