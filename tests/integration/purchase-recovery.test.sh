@@ -10,7 +10,9 @@
 #
 # The concurrent scenarios run as parallel processes started from this SSH session (PHP-CLI on
 # the box cannot start any). The failed-rollback scenario installs a dev-only hook
-# (hooks/vhtest-rollback-interference.php) into includes/hooks and removes it again.
+# (hooks/vhtest-rollback-interference.php) into includes/hooks and removes it again; the
+# half-made-* scenarios do the same with hooks/vhtest-half-made-order.php (an AddOrder that fails
+# after creating the order and its invoice).
 #
 # Usage: ./purchase-recovery.test.sh [scenario ...]   (default: every scenario, in order)
 #
@@ -43,9 +45,10 @@ RUN="$(date +%s)"
 ENV="RUN=$RUN HUB_URL=$(printf %q "$HUB_URL") HUB_KEY=$(printf %q "$HUB_KEY") HUB_SECRET=$(printf %q "$HUB_SECRET")"
 T='~/tmp/purchase-recovery.test.php'
 HOOK="$WEBROOT/includes/hooks/vhtest-rollback-interference.php"
+HALF_HOOK="$WEBROOT/includes/hooks/vhtest-half-made-order.php"
 
 cleanup() {
-  "${SSH[@]}" "rm -f '$HOOK' ~/tmp/vhtest-rollback-interference; rm -rf ~/tmp/purchase-recovery.test.php ~/tmp/lib ~/tmp/vhrt" || true
+  "${SSH[@]}" "rm -f '$HOOK' '$HALF_HOOK' ~/tmp/vhtest-rollback-interference ~/tmp/vhtest-half-made-order; rm -rf ~/tmp/purchase-recovery.test.php ~/tmp/lib ~/tmp/vhrt" || true
 }
 trap cleanup EXIT
 
@@ -60,7 +63,8 @@ scenario() { echo "== $*"; remote "$ENV php $T $*"; }
 
 SCENARIOS=("$@")
 [ ${#SCENARIOS[@]} -eq 0 ] && SCENARIOS=(insufficient-credit failure-after-payment keyless-failure-after-payment
-  failed-rollback crash-resume token-record-lost csv views link-race shared-credit)
+  failed-rollback crash-resume half-made-order half-made-twice half-made-resume half-made-resume-twice half-made-parked
+  no-marker-failure token-record-lost csv views link-race shared-credit)
 
 for s in "${SCENARIOS[@]}"; do
   case "$s" in
@@ -68,6 +72,11 @@ for s in "${SCENARIOS[@]}"; do
       scp -i "$SSH_KEY" -o ServerAliveInterval=15 -o ServerAliveCountMax=4 -q "$SCRIPT_DIR/hooks/vhtest-rollback-interference.php" "$SSH_HOST":"$HOOK"
       scenario failed-rollback
       "${SSH[@]}" "rm -f '$HOOK'"
+      ;;
+    half-made-*)
+      scp -i "$SSH_KEY" -o ServerAliveInterval=15 -o ServerAliveCountMax=4 -q "$SCRIPT_DIR/hooks/vhtest-half-made-order.php" "$SSH_HOST":"$HALF_HOOK"
+      scenario "$s"
+      "${SSH[@]}" "rm -f '$HALF_HOOK' ~/tmp/vhtest-half-made-order"
       ;;
     link-race)
       scenario link-race-setup

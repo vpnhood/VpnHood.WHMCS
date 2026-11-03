@@ -292,34 +292,97 @@ class PurchaseRepository
      * The service AddOrder created for this purchase, found by the marker WHMCS wrote onto it.
      * A key that started over after a rollback can have an older, cancelled attempt too: the
      * newest live one is the attempt that counts.
+     *
+     * `invoice_linked` is false when the order does not name its invoice: an AddOrder that failed
+     * after creating the invoice never linked it, so the invoice is then the one billing the
+     * service (`invoice_id` 0 when none or several do).
      */
     public function markedService(int $purchaseId, int $clientId): ?array
     {
-        $row = Capsule::table('tblcustomfieldsvalues as v')
+        $row = $this->markedServices($purchaseId, $clientId)
+            ->where(function ($q) {
+                $q->whereNull('o.status')->orWhereNotIn('o.status', ['Cancelled', 'Fraud']);
+            })
+            ->orderBy('h.id', 'desc')
+            ->first(['h.id as service_id', 'h.orderid as order_id', 'o.invoiceid as invoice_id']);
+        if ($row === null) {
+            return null;
+        }
+        $marked = (array) $row;
+        $marked['invoice_linked'] = (int) $marked['invoice_id'] > 0;
+        if (!$marked['invoice_linked']) {
+            $marked['invoice_id'] = $this->soleServiceInvoiceId((int) $marked['service_id'], $clientId);
+        }
+        return $marked;
+    }
+
+    /**
+     * Every attempt of this purchase that WHMCS still holds, cancelled ones included, with each
+     * service's status and its order's: what a release must find ended.
+     *
+     * @return list<array{service_id: int, order_id: int, service_status: string, order_status: string}>
+     */
+    public function markedAttempts(int $purchaseId, int $clientId): array
+    {
+        return array_map(fn ($r) => [
+            'service_id'     => (int) $r->service_id,
+            'order_id'       => (int) $r->order_id,
+            'service_status' => (string) $r->service_status,
+            'order_status'   => (string) $r->order_status,
+        ], $this->markedServices($purchaseId, $clientId)->orderBy('h.id')
+            ->get(['h.id as service_id', 'h.orderid as order_id', 'h.domainstatus as service_status', 'o.status as order_status'])
+            ->all());
+    }
+
+    private function markedServices(int $purchaseId, int $clientId)
+    {
+        return Capsule::table('tblcustomfieldsvalues as v')
             ->join('tblcustomfields as f', 'f.id', '=', 'v.fieldid')
             ->join('tblhosting as h', 'h.id', '=', 'v.relid')
             ->leftJoin('tblorders as o', 'o.id', '=', 'h.orderid')
             ->where('f.type', 'product')
             ->whereRaw("SUBSTRING_INDEX(f.fieldname, '|', 1) = ?", [self::MARKER_FIELD])
             ->where('v.value', (string) $purchaseId)
-            ->where('h.userid', $clientId)
-            ->where(function ($q) {
-                $q->whereNull('o.status')->orWhereNotIn('o.status', ['Cancelled', 'Fraud']);
-            })
-            ->orderBy('h.id', 'desc')
-            ->first(['h.id as service_id', 'h.orderid as order_id', 'o.invoiceid as invoice_id']);
-        return $row ? (array) $row : null;
+            ->where('h.userid', $clientId);
     }
 
-    /** Orders of the client since $since that no purchase accounts for. */
-    public function unexplainedOrderIds(int $clientId, string $since): array
+    /** The client's invoices with a line for this service, in any status. */
+    public function serviceInvoiceIds(int $serviceId, int $clientId): array
     {
-        return Capsule::table('tblorders as o')
+        return Capsule::table('tblinvoiceitems as i')
+            ->join('tblinvoices as inv', 'inv.id', '=', 'i.invoiceid')
+            ->where('i.relid', $serviceId)
+            ->whereIn('i.type', ['Hosting', 'PromoHosting'])
+            ->where('inv.userid', $clientId)
+            ->distinct()->orderBy('inv.id')
+            ->pluck('inv.id')->map(fn ($id) => (int) $id)->all();
+    }
+
+    /**
+     * The invoice of an order that does not name it: the only invoice billing its service, or 0
+     * when none or several do — the order's own invoice cannot be told from a later one then.
+     */
+    public function soleServiceInvoiceId(int $serviceId, int $clientId): int
+    {
+        $ids = $this->serviceInvoiceIds($serviceId, $clientId);
+        return count($ids) === 1 ? $ids[0] : 0;
+    }
+
+    /** Orders of the client since $since (and until $until) that no purchase accounts for; $liveOnly skips ended ones. */
+    public function unexplainedOrderIds(int $clientId, string $since, ?string $until = null, bool $liveOnly = false): array
+    {
+        $query = Capsule::table('tblorders as o')
             ->leftJoin(self::TABLE . ' as p', 'p.order_id', '=', 'o.id')
             ->where('o.userid', $clientId)
             ->where('o.date', '>=', $since)
-            ->whereNull('p.id')
-            ->orderBy('o.id')
+            ->whereNull('p.id');
+        if ($until !== null) {
+            $query->where('o.date', '<=', $until);
+        }
+        if ($liveOnly) {
+            $query->whereNotIn('o.status', ['Cancelled', 'Fraud']);
+        }
+        return $query->orderBy('o.id')
             ->pluck('o.id')
             ->map(fn ($id) => (int) $id)
             ->all();

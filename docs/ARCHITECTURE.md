@@ -229,7 +229,19 @@ midway drops the table so the next activation starts over.
    1. `AddOrder` → `ordered`. The request carries the purchase id in the admin-only product
       custom field `hubPurchaseId` (created on first use per product), so WHMCS itself writes it
       onto the service — the footprint that finds the order if this request dies before saving
-      its ids. A rejected `AddOrder` → `rolled_back` and `422`.
+      its ids. A rejected `AddOrder` → `rolled_back` and `422`, once nothing it may have created
+      is left: an order of the client since the purchase began that no purchase accounts for →
+      `needs_reconciliation`. **A half-made order** — WHMCS 9.1.0's `AddOrder` can fail after
+      creating the order, its service and its invoice, before the order names that invoice — is
+      never continued: what else `AddOrder` left undone is unknown. Its ids are saved and the
+      purchase parked first; then, under the client's credit lock, when it is provably this
+      purchase's only live attempt and untouched (order and its one service Pending, nothing
+      provisioned or queued, exactly one invoice billing only that service, Unpaid, with no
+      transaction at all), it is removed — the invoice cancelled first, since `DeleteOrder` leaves
+      an invoice its order does not name, then `CancelOrder` + `DeleteOrder`; complete means order
+      and service gone, the invoice Cancelled, the credit unchanged — and the purchase orders
+      again, once per request (a second half-made order is removed the same way → `rolled_back`
+      and `422`). Anything else stays `needs_reconciliation` with the ids recorded.
    2. **Payment**, under the credit lock of the WHMCS client (`GET_LOCK`, shared with `renew`):
       re-read the credit and the invoice balance, and apply the **full** balance or nothing.
       WHMCS 9 books applied credit as a credit note plus a payment in `tblaccounts`, so
@@ -265,8 +277,11 @@ repeat across installs, reinstalls and restored backups — a key saved per purc
 
 **Resume** (`PurchaseProcessor::resume`): the saved state proves only what finished; the next
 step may have run before the request died. Its footprint decides, and only a provably absent
-step is redone. From `created`: the marker on a service → adopt its order; no marker and no
-order of the client since that no purchase accounts for → order now; otherwise a person.
+step is redone. From `created`: the marker on a service → adopt its order, whose payment is then
+checked as from `ordered` (an order that does not name its invoice is a half-made one, removed or
+parked as in step 5.1); no marker and no order of the client since that no purchase accounts
+for → order now; otherwise a person. An order without an invoice is free only when it charges
+0.00 and no invoice bills its service; otherwise a person.
 From `ordered`: invoice Paid → `paid`, and provisioning goes on exactly as in step 3 (for a
 product provisioned on payment, WHMCS's run during that payment was the attempt; `AcceptOrder`
 never ran — the state after payment is saved first); Unpaid with nothing applied → pay;
@@ -284,11 +299,15 @@ must match exactly one row (`409 already_claimed` otherwise), and the order's de
 returned. It never buys; a Hub without the action answers `404`.
 
 **Purchases needing attention** (the partner's page in the addon): `needs_reconciliation` rows,
-and rows left in a step for more than ten minutes (a keyless request that died). **Retry**
-re-checks the footprints and, when the service is provisioned and the invoice paid, reads the
-key and marks it delivered, accepting a still-Pending order with `autosetup` off; **Release**
-closes an unfinished purchase as `rolled_back` once no order or payment of it remains (or the
-admin confirms the refund). Neither orders, pays or provisions.
+and rows left in a step for more than ten minutes (a keyless request that died). Both buttons
+first record what the row lacks: the marked order, and the invoice of an order that does not
+name it (the only invoice billing its service). **Retry** re-checks the footprints and, when the
+service is provisioned and the invoice paid, reads the key and marks it delivered, accepting a
+still-Pending order with `autosetup` off; **Release** closes an unfinished purchase as
+`rolled_back` once no order, service or Unpaid invoice of any attempt WHMCS holds is live, nor a
+live order of the client placed while the purchase was ordering that no purchase accounts for —
+never waived — and no payment remains, or the admin confirms its refund. Neither orders, pays or
+provisions.
 
 **Paid but not provisioned — the support procedure** (also on that page). Create may run again
 only after a confirmed failure *before* token creation, or confirmation that the creation

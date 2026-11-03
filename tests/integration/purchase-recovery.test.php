@@ -40,6 +40,7 @@ const REF_CSV       = 'reseller-bulk-csv-premium-code';
 const PRICE         = 1.75;
 const RESULTS_DIR   = '/home/whmcsdev/tmp/vhrt';
 const FAIL_FLAG     = '/home/whmcsdev/tmp/vhtest-rollback-interference';
+const HALF_FLAG     = '/home/whmcsdev/tmp/vhtest-half-made-order';
 
 $reseller = clientByEmail($db, RESELLER_EMAIL);
 $partnerRow = $reseller ? Capsule::table('mod_vpnhood_partners')->where('client_id', $reseller['id'])->first() : null;
@@ -220,6 +221,81 @@ function attentionHtml(): string
     return (string) ob_get_clean();
 }
 
+/** Make the next $times AddOrders of the test reseller fail after creating their invoice (hooks/vhtest-half-made-order.php). */
+function armHalfMade(int $times): void
+{
+    global $clientId;
+    file_put_contents(HALF_FLAG, "$clientId $times");
+}
+
+function disarmHalfMade(): void
+{
+    @unlink(HALF_FLAG);
+}
+
+/** A purchase row with no ids: a request that stopped inside AddOrder, or a half-made order parked without them. */
+function insertPurchase(string $key, string $state): int
+{
+    global $partner, $clientId;
+    return (int) Capsule::table(PurchaseRepository::TABLE)->insertGetId([
+        'partner_id' => $partner['id'], 'client_id' => $clientId, 'idempotency_key' => $key, 'customer_reference' => $key,
+        'product_id' => hubProductId(REF_ONETIME), 'billing_cycle' => 'onetime', 'state' => $state,
+        'last_error' => $state === 'needs_reconciliation' ? 'AddOrder failed after creating an order: vhtest' : null,
+        'created_at' => date('Y-m-d H:i:s'), 'updated_at' => date('Y-m-d H:i:s'),
+    ]);
+}
+
+/** AddOrder for purchase #$purchaseId, carrying its marker, failing after it created the invoice: what WHMCS 9.1.0 left on production. */
+function makeHalfMadeOrder(int $purchaseId): array
+{
+    global $clientId;
+    $productId = hubProductId(REF_ONETIME);
+    $repo = new PurchaseRepository();
+    $params = ['clientid' => $clientId, 'pid' => $productId, 'billingcycle' => 'onetime', 'noemail' => true, 'noinvoiceemail' => true,
+        'customfields' => base64_encode(serialize([$repo->markerFieldId($productId) => (string) $purchaseId]))];
+    $gateway = (string) ((new PartnerRepository())->settings()['orderGateway'] ?? '');
+    if ($gateway !== '') {
+        $params['paymentmethod'] = $gateway;
+    }
+    armHalfMade(1);
+    try {
+        $r = localAPI('AddOrder', $params);
+    } finally {
+        disarmHalfMade();
+    }
+    expect(($r['result'] ?? '') === 'error' && strpos((string) ($r['message'] ?? ''), 'vhtest') !== false, 'AddOrder fails after creating the invoice', $r);
+    $marked = $repo->markedService($purchaseId, $clientId);
+    expect($marked !== null && !$marked['invoice_linked'] && (int) $marked['invoice_id'] > 0
+        && Capsule::table('tblinvoices')->where('id', (int) $marked['invoice_id'])->value('status') === 'Unpaid',
+        'the half-made order carries the marker; its Unpaid invoice is not named by the order', $marked);
+    return ['order' => (int) ($marked['order_id'] ?? 0), 'service' => (int) ($marked['service_id'] ?? 0), 'invoice' => (int) ($marked['invoice_id'] ?? 0)];
+}
+
+/** The orders and invoices the Hub says it removed for purchase #$purchaseId (its activity-log lines), oldest first. */
+function removedHalfMade(int $purchaseId): array
+{
+    global $clientId;
+    $removed = [];
+    foreach (Capsule::table('tblactivitylog')->where('userid', $clientId)
+        ->where('description', 'like', "Partner Hub: purchase #{$purchaseId}: %cancelled.")->orderBy('id')->pluck('description') as $line) {
+        if (preg_match('/order #(\d+) was deleted and its invoice #(\d+) cancelled/', (string) $line, $m)) {
+            $removed[] = ['order' => (int) $m[1], 'invoice' => (int) $m[2]];
+        }
+    }
+    return $removed;
+}
+
+function expectRemoved(array $made): void
+{
+    $order = Capsule::table('tblorders')->where('id', $made['order'])->exists();
+    $service = Capsule::table('tblhosting')->where('orderid', $made['order'])->exists();
+    $invoiceStatus = (string) Capsule::table('tblinvoices')->where('id', $made['invoice'])->value('status');
+    expect(!$order && !$service && $invoiceStatus === 'Cancelled',
+        "half-made order #{$made['order']} and its service deleted, its invoice #{$made['invoice']} Cancelled",
+        ['order' => $order, 'service' => $service, 'invoice' => $invoiceStatus]);
+    expect(tokensOf($made['order']) === [], "... no token for order #{$made['order']}");
+}
+
 function saveResult(string $name, array $r): void
 {
     @mkdir(RESULTS_DIR, 0700, true);
@@ -391,6 +467,164 @@ case 'crash-resume':
     expect(abs(credit() - ($afterPurchase - PRICE)) < 0.001, '... charged once');
     terminateOrder($orderId);
     terminateOrder(orderIdOf($new));
+    break;
+
+// AddOrder fails after creating the order and its invoice (hooks/vhtest-half-made-order.php): the
+// untouched order is removed, never continued, and the purchase orders again — once.
+case 'half-made-order':
+case 'half-made-twice':
+    $twice = $scenario === 'half-made-twice';
+    $key = "rt-$run-" . ($twice ? 'half-twice' : 'half');
+    $before = credit();
+    armHalfMade($twice ? 2 : 1);
+    try {
+        $r = order(REF_ONETIME, $key, $key);
+    } finally {
+        disarmHalfMade();
+    }
+    $p = purchase($key);
+    $removed = $p !== null ? removedHalfMade((int) $p['id']) : [];
+    expect(count($removed) === ($twice ? 2 : 1), 'the Hub removed ' . ($twice ? 'both half-made orders' : 'the half-made order'), $removed);
+    foreach ($removed as $made) {
+        expectRemoved($made);
+    }
+    if ($twice) {
+        expect($r['status'] === 422 && strpos((string) ($r['body']['error'] ?? json_encode($r['body'])), 'vhtest') !== false,
+            'a second half-made order: 422 with WHMCS\'s own error', $r);
+        expect($p !== null && $p['state'] === 'rolled_back' && $p['order_id'] === null, 'purchase rolled back, key released', $p);
+        expect(credit() === $before, 'nothing charged', credit());
+        $r = order(REF_ONETIME, $key, $key);
+        expect($r['status'] === 200 && ($r['body']['data']['replayed'] ?? null) === false, 'the same key then buys', $r);
+    } else {
+        expect($r['status'] === 200 && ($r['body']['data']['replayed'] ?? null) === false, 'the keyed order is delivered in the same request', $r);
+    }
+    $orderId = orderIdOf($r);
+    $p = purchase($key);
+    $invoiceId = (int) Capsule::table('tblorders')->where('id', $orderId)->value('invoiceid');
+    expect($p['state'] === 'delivered' && (int) $p['order_id'] === $orderId && (int) $p['invoice_id'] === $invoiceId && $invoiceId > 0
+        && !in_array($orderId, array_column($removed, 'order'), true), "delivered as a new order #$orderId, its invoice #$invoiceId", $p);
+    expect(Capsule::table('tblinvoices')->where('id', $invoiceId)->value('status') === 'Paid' && abs(credit() - ($before - PRICE)) < 0.001,
+        'its invoice Paid, charged once', ['credit' => credit(), 'before' => $before]);
+    expect(count(tokensOf($orderId)) === 1, 'one token');
+    $again = order(REF_ONETIME, $key, $key);
+    expect($again['status'] === 200 && orderIdOf($again) === $orderId && ($again['body']['data']['replayed'] ?? null) === true,
+        'the repeat returns that order', $again);
+    terminateOrder($orderId);
+    break;
+
+// A request that stopped inside AddOrder at that point: the keyed repeat removes the half-made
+// order instead of paying it, and orders — once: a replacement that fails the same way ends it.
+case 'half-made-resume':
+case 'half-made-resume-twice':
+    $twice = $scenario === 'half-made-resume-twice';
+    $key = "rt-$run-" . ($twice ? 'half-resume-twice' : 'half-resume');
+    $before = credit();
+    $id = insertPurchase($key, 'created');
+    $made = makeHalfMadeOrder($id);
+    if ($twice) {
+        armHalfMade(1);
+    }
+    try {
+        $r = order(REF_ONETIME, $key, $key);
+    } finally {
+        disarmHalfMade();
+    }
+    $removed = removedHalfMade($id);
+    expect(count($removed) === ($twice ? 2 : 1) && $removed[0]['order'] === $made['order'], 'the activity log names each removed order', $removed);
+    foreach ($removed as $gone) {
+        expectRemoved($gone);
+    }
+    if ($twice) {
+        expect($r['status'] === 422 && purchase($key)['state'] === 'rolled_back' && credit() === $before,
+            'the replacement failing too: 422, rolled back, nothing charged — no third order', ['response' => $r, 'credit' => credit()]);
+        $r = order(REF_ONETIME, $key, $key);
+    }
+    expect($r['status'] === 200 && ($r['body']['data']['replayed'] ?? null) === false && orderIdOf($r) !== $made['order'],
+        $twice ? 'the key then buys' : 'the repeat removes the half-made order and orders', $r);
+    expect(abs(credit() - ($before - PRICE)) < 0.001 && count(tokensOf(orderIdOf($r))) === 1, 'charged once, one token');
+    terminateOrder(orderIdOf($r));
+    break;
+
+// AddOrder rejected before it created anything (an unknown payment method): the key is released —
+// unless a live order of the client that no purchase accounts for appeared meanwhile, which may be
+// one WHMCS created before writing the marker: then the purchase is parked and Release waits for it.
+case 'no-marker-failure':
+    $before = credit();
+    $setting = fn () => Capsule::table('tbladdonmodules')->where('module', 'vpnhoodpartnerhub')->where('setting', 'OrderGateway');
+    $gateway = (string) $setting()->value('value');
+    $rejected = "rt-$run-rejected";
+    $parked = "rt-$run-orphan";
+    $stray = 0;
+    $id = 0;
+    try {
+        $setting()->update(['value' => 'vhtest-no-such-gateway']);
+        $r = order(REF_ONETIME, $rejected, $rejected);
+        expect($r['status'] === 422 && purchase($rejected)['state'] === 'rolled_back', 'a rejected AddOrder: 422, key released', $r);
+        $params = ['clientid' => $clientId, 'pid' => hubProductId(REF_ONETIME), 'billingcycle' => 'onetime', 'noemail' => true, 'noinvoiceemail' => true];
+        if ($gateway !== '') {
+            $params['paymentmethod'] = $gateway;
+        }
+        $add = localAPI('AddOrder', $params);
+        $stray = (int) ($add['orderid'] ?? 0);
+        expect($stray > 0, "an order no purchase accounts for (#$stray)", $add);
+        $r = order(REF_ONETIME, $parked, $parked);
+        expect($r['status'] === 409 && codeOf($r) === 'needs_reconciliation' && strpos((string) ($r['body']['error'] ?? ''), "order #$stray") !== false,
+            'rejected while that order is live: parked, naming it', $r);
+        $id = (int) (purchase($parked)['id'] ?? 0);
+        $message = processor()->release($id, true);
+        expect(strpos($message, 'not released') !== false && strpos($message, "order #$stray") !== false,
+            'Release waits for that order, "Refund done" or not', $message);
+    } finally {
+        $setting()->update(['value' => $gateway]);
+        if ($stray > 0) {
+            $invoice = (int) Capsule::table('tblorders')->where('id', $stray)->value('invoiceid');
+            if ($invoice > 0) {
+                localAPI('UpdateInvoice', ['invoiceid' => $invoice, 'status' => 'Cancelled']);
+            }
+            localAPI('CancelOrder', ['orderid' => $stray, 'cancelsub' => false]);
+            localAPI('DeleteOrder', ['orderid' => $stray]);
+        }
+    }
+    $message = processor()->release($id, false);
+    expect(strpos($message, 'released') !== false, 'that order gone, Release frees the key', $message);
+    $r = order(REF_ONETIME, $parked, $parked);
+    expect($r['status'] === 200 && ($r['body']['data']['replayed'] ?? null) === false, 'the key then buys', $r);
+    expect(abs(credit() - ($before - PRICE)) < 0.001, 'charged once', ['credit' => credit(), 'before' => $before]);
+    terminateOrder(orderIdOf($r));
+    break;
+
+// A half-made order parked with no ids: Retry and Release find it by its marker; Release waits
+// until nothing of it can provision or collect; then the key buys once.
+case 'half-made-parked':
+    $key = "rt-$run-half-parked";
+    $before = credit();
+    $id = insertPurchase($key, 'needs_reconciliation');
+    $made = makeHalfMadeOrder($id);
+    $message = processor()->retry($id);
+    expect(strpos($message, "Invoice #{$made['invoice']} is Unpaid") !== false && strpos($message, 'never paid') !== false,
+        'Retry finds the invoice the order does not name: never paid', $message);
+    $row = (array) Capsule::table(PurchaseRepository::TABLE)->where('id', $id)->first();
+    expect((int) $row['order_id'] === $made['order'] && (int) $row['invoice_id'] === $made['invoice'] && (int) $row['service_id'] === $made['service'],
+        'Retry recorded the order, invoice and service', $row);
+    $message = processor()->release($id, true);
+    expect(strpos($message, 'not released') !== false && strpos($message, "order #{$made['order']} is Pending") !== false
+        && strpos($message, "invoice #{$made['invoice']} is Unpaid") !== false, 'Release refused while the order and its invoice are live, "Refund done" or not', $message);
+    $cancel = localAPI('CancelOrder', ['orderid' => $made['order'], 'cancelsub' => false]);
+    expect(($cancel['result'] ?? '') === 'success' && Capsule::table('tblinvoices')->where('id', $made['invoice'])->value('status') === 'Unpaid',
+        'CancelOrder leaves the invoice the order does not name Unpaid', $cancel);
+    $message = processor()->release($id, false);
+    expect(strpos($message, 'not released') !== false && strpos($message, "invoice #{$made['invoice']} is Unpaid") !== false
+        && strpos($message, 'order #') === false, 'Release still refused: the invoice could be paid', $message);
+    $update = localAPI('UpdateInvoice', ['invoiceid' => $made['invoice'], 'status' => 'Cancelled']);
+    expect(($update['result'] ?? '') === 'success', "invoice #{$made['invoice']} cancelled, as WHMCS's overdue cancellation does a day later", $update);
+    $message = processor()->release($id, false);
+    expect(strpos($message, 'released') !== false && purchase($key)['state'] === 'rolled_back', 'now Release frees the key', $message);
+    $r = order(REF_ONETIME, $key, $key);
+    expect($r['status'] === 200 && ($r['body']['data']['replayed'] ?? null) === false && orderIdOf($r) !== $made['order'],
+        'the same key buys a new order', $r);
+    expect(abs(credit() - ($before - PRICE)) < 0.001 && count(tokensOf(orderIdOf($r))) === 1, 'charged once, one token');
+    terminateOrder(orderIdOf($r));
+    localAPI('DeleteOrder', ['orderid' => $made['order']]);
     break;
 
 // Plan test 21 — the token was created but its record lost: adopt it, never create another.

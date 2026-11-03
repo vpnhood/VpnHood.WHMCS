@@ -21,6 +21,10 @@ require_once __DIR__ . '/RefundPolicy.php';
  * Provisioning is never redone: its token request can outlive a dying request and still create
  * a token, so a second AcceptOrder could mint a second one.
  *
+ * An order AddOrder failed to finish is never continued — what else it left undone is unknown,
+ * and DeleteOrder leaves behind an invoice its order does not name. Untouched, it is removed and
+ * the purchase orders once more (recoverHalfMadeOrder()); otherwise a person decides.
+ *
  * Money rules, for every order: credit is applied in full or not at all, under the client's
  * credit lock; an order is rolled back only while no credit is applied to it, and only a
  * verified rollback releases its key; an order is never deleted once paid.
@@ -366,18 +370,15 @@ class PurchaseProcessor
             if ($purchase['state'] === PurchaseRepository::DELIVERED || $purchase['state'] === PurchaseRepository::ROLLED_BACK) {
                 return "Purchase #{$id} is " . str_replace('_', ' ', $purchase['state']) . '; there is nothing to finish.';
             }
+            $purchase = $this->recordMarkedIds($purchase);
             if ((int) $purchase['order_id'] === 0) {
-                $marked = $this->purchases->markedService($id, (int) $purchase['client_id']);
-                if ($marked === null) {
-                    return "No order exists for purchase #{$id}. If nothing was charged, release it.";
-                }
-                $purchase = $this->purchases->setState($id, $purchase['state'], [
-                    'order_id'   => (int) $marked['order_id'],
-                    'invoice_id' => (int) $marked['invoice_id'] ?: null,
-                    'service_id' => (int) $marked['service_id'],
-                ]);
+                return "No order exists for purchase #{$id}. If nothing was charged, release it.";
             }
             $invoiceId = (int) $purchase['invoice_id'];
+            if ($invoiceId === 0 && !$this->isFreeOrder((int) $purchase['order_id'], (int) $purchase['service_id'], (int) $purchase['client_id'])) {
+                return "Purchase #{$id}: no invoice of order #{$purchase['order_id']} can be told apart, and the order is not free."
+                    . ' Check its invoices by hand.';
+            }
             $invoiceStatus = $invoiceId > 0 ? (string) Capsule::table('tblinvoices')->where('id', $invoiceId)->value('status') : 'Paid';
             if ($invoiceStatus !== 'Paid') {
                 return "Invoice #{$invoiceId} is " . ($invoiceStatus ?: 'deleted') . ': purchase #' . $id . ' was never paid.'
@@ -402,8 +403,10 @@ class PurchaseProcessor
     }
 
     /**
-     * "Release": close an unfinished purchase as rolled back, which frees its key. Refused
-     * while an order or a payment it made still exists, unless the person confirms the refund.
+     * "Release": close an unfinished purchase as rolled back, which frees its key. Refused while
+     * anything of it could still provision or collect — an order, a service, an Unpaid invoice of
+     * any attempt WHMCS holds — and, unless the person confirms the refund, while a payment it
+     * made remains.
      */
     public function release(int $purchaseId, bool $refundConfirmed): string
     {
@@ -412,25 +415,60 @@ class PurchaseProcessor
             if ($purchase['state'] === PurchaseRepository::DELIVERED || $purchase['state'] === PurchaseRepository::ROLLED_BACK) {
                 return "Purchase #{$id} is " . str_replace('_', ' ', $purchase['state']) . '; only an unfinished purchase can be released.';
             }
-            $held = [];
-            $orderId = (int) $purchase['order_id'];
-            $orderStatus = $orderId > 0 ? (string) Capsule::table('tblorders')->where('id', $orderId)->value('status') : '';
-            if ($orderStatus !== '' && !in_array($orderStatus, ['Cancelled', 'Fraud'], true)) {
-                $held[] = "order #{$orderId} is {$orderStatus}";
+            $purchase = $this->recordMarkedIds($purchase);
+            $clientId = (int) $purchase['client_id'];
+            $orderIds = (int) $purchase['order_id'] > 0 ? [(int) $purchase['order_id']] : [];
+            $serviceIds = (int) $purchase['service_id'] > 0 ? [(int) $purchase['service_id']] : [];
+            foreach ($this->purchases->markedAttempts($id, $clientId) as $attempt) {
+                $orderIds[] = $attempt['order_id'];
+                $serviceIds[] = $attempt['service_id'];
             }
-            $invoiceId = (int) $purchase['invoice_id'];
-            if ($invoiceId > 0) {
+
+            $live = [];
+            foreach (array_unique($orderIds) as $orderId) {
+                $status = (string) Capsule::table('tblorders')->where('id', $orderId)->value('status');
+                if ($status !== '' && !in_array($status, ['Cancelled', 'Fraud'], true)) {
+                    $live[] = "order #{$orderId} is {$status}";
+                }
+            }
+            // An order WHMCS created before writing the marker carries none: a live order of the
+            // client placed while this purchase was ordering, that no purchase accounts for, may be its.
+            $created = strtotime((string) $purchase['created_at']);
+            $unexplained = $this->purchases->unexplainedOrderIds($clientId, date('Y-m-d H:i:s', $created - 60), date('Y-m-d H:i:s', $created + 300), true);
+            foreach (array_diff($unexplained, $orderIds) as $orderId) {
+                $status = (string) Capsule::table('tblorders')->where('id', $orderId)->value('status');
+                $live[] = "order #{$orderId}, placed while this purchase was ordering, has no purchase record and is {$status}";
+            }
+            $invoiceIds = (int) $purchase['invoice_id'] > 0 ? [(int) $purchase['invoice_id']] : [];
+            foreach (array_unique($serviceIds) as $serviceId) {
+                $status = (string) Capsule::table('tblhosting')->where('id', $serviceId)->value('domainstatus');
+                if (in_array($status, ['Pending', 'Active', 'Suspended'], true)) {
+                    $live[] = "service #{$serviceId} is {$status}";
+                }
+                $invoiceIds = array_merge($invoiceIds, $this->purchases->serviceInvoiceIds($serviceId, $clientId));
+            }
+            $held = [];
+            foreach (array_unique($invoiceIds) as $invoiceId) {
                 $invoiceStatus = (string) Capsule::table('tblinvoices')->where('id', $invoiceId)->value('status');
                 $payments = $this->invoicePayments($invoiceId, $invoiceStatus === 'Cancelled');
+                if ($invoiceStatus === 'Unpaid') {
+                    $live[] = "invoice #{$invoiceId} is Unpaid";
+                }
                 if ($invoiceStatus === 'Paid') {
                     $held[] = "invoice #{$invoiceId} is Paid";
                 } elseif ($payments > 0.004) {
                     $held[] = "invoice #{$invoiceId} holds {$payments} of payments or applied credit";
                 }
             }
+            // A refund settles money, not what could still provision or collect: never waived.
+            if ($live !== []) {
+                return "Purchase #{$id} was not released: " . implode('; ', array_merge($live, $held))
+                    . '. Cancel the order and its unpaid invoice first' . ($held !== [] ? ', refund what was paid, tick "Refund done"' : '')
+                    . ' and release again.';
+            }
             if ($held !== [] && !$refundConfirmed) {
                 return "Purchase #{$id} was not released: " . implode('; ', $held)
-                    . '. Cancel and refund first, then tick "Refund done" and release again.';
+                    . '. Refund first, then tick "Refund done" and release again.';
             }
             $this->purchases->setState($id, PurchaseRepository::ROLLED_BACK, [
                 'order_id'   => null,
@@ -496,7 +534,8 @@ class PurchaseProcessor
         return $this->complete($purchase);
     }
 
-    private function addOrder(array $purchase): array
+    /** @param bool $mayRetry false for the one new order placed after a half-made one was removed */
+    private function addOrder(array $purchase, bool $mayRetry = true): array
     {
         $id = (int) $purchase['id'];
         $params = [
@@ -519,9 +558,25 @@ class PurchaseProcessor
         try {
             $add = LocalApi::call('AddOrder', $params);
         } catch (ApiException $e) {
-            // WHMCS refuses before it writes anything; the marker proves nothing was ordered.
-            if ($this->purchases->markedService($id, (int) $purchase['client_id']) !== null) {
-                throw $this->toReconciliation($purchase, 'AddOrder failed after creating an order: ' . $e->getMessage());
+            $clientId = (int) $purchase['client_id'];
+            $marked = $this->purchases->markedService($id, $clientId);
+            if ($marked !== null) {
+                $restarted = $this->recoverHalfMadeOrder($purchase, $marked,
+                    'AddOrder failed after creating order #' . (int) $marked['order_id'] . ': ' . $e->getMessage());
+                if ($mayRetry) {
+                    return $this->addOrder($restarted, false);
+                }
+                $this->purchases->advance($id, PurchaseRepository::CREATED, PurchaseRepository::ROLLED_BACK, ['last_error' => $restarted['last_error']]);
+                throw $e;
+            }
+            // No marker, yet WHMCS may have created the order before writing it: a live order of the
+            // client since this purchase began that no purchase accounts for makes "nothing was
+            // ordered" unprovable, as on a resume.
+            $since = date('Y-m-d H:i:s', strtotime((string) $purchase['created_at']) - 60);
+            $unexplained = $this->purchases->unexplainedOrderIds($clientId, $since, null, true);
+            if ($unexplained !== []) {
+                throw $this->toReconciliation($purchase, $e->getMessage() . '; order #' . implode(', #', $unexplained)
+                    . ' of this client has no purchase record');
             }
             $this->purchases->advance($id, PurchaseRepository::CREATED, PurchaseRepository::ROLLED_BACK, ['last_error' => $e->getMessage()]);
             throw $e;
@@ -560,6 +615,9 @@ class PurchaseProcessor
         $clientId = (int) $purchase['client_id'];
         $invoiceId = (int) $purchase['invoice_id'];
         if ($invoiceId === 0) {
+            if (!$this->isFreeOrder((int) $purchase['order_id'], (int) $purchase['service_id'], $clientId)) {
+                throw $this->toReconciliation($purchase, "Order #{$purchase['order_id']} is not free, but no invoice of it can be told apart");
+            }
             return $this->purchases->advance($id, PurchaseRepository::ORDERED, PurchaseRepository::PAID); // free product
         }
 
@@ -644,6 +702,151 @@ class PurchaseProcessor
             'last_error' => "{$message} (order #{$orderId}, invoice #{$invoiceId} rolled back)",
         ]);
         throw new ApiException($message, $status, $code);
+    }
+
+    /**
+     * An order AddOrder created but did not finish (WHMCS 9.1.0 fails, rarely, after creating the
+     * invoice and before the order names it). Its ids are saved and the purchase parked first, so a
+     * request that dies from here on leaves them to a person. Provably untouched — nothing paid,
+     * nothing provisioned — it is removed under the client's credit lock, so no Hub payment can
+     * land between the check and the removal, each step verified, and the purchase is back at
+     * 'created' with nothing ordered. Anything else stays parked.
+     *
+     * @throws ApiException
+     */
+    private function recoverHalfMadeOrder(array $purchase, array $marked, string $failure): array
+    {
+        $id = (int) $purchase['id'];
+        $clientId = (int) $purchase['client_id'];
+        $orderId = (int) $marked['order_id'];
+        $serviceId = (int) $marked['service_id'];
+        $invoiceId = (int) $marked['invoice_id'];
+        $purchase = $this->purchases->advance($id, PurchaseRepository::CREATED, PurchaseRepository::NEEDS_RECONCILIATION, [
+            'order_id'   => $orderId,
+            'invoice_id' => $invoiceId ?: null,
+            'service_id' => $serviceId,
+            'last_error' => mb_substr($failure, 0, 2000),
+        ]);
+
+        $lock = PurchaseRepository::creditLock($clientId);
+        if (!$this->purchases->lock($lock, self::CREDIT_LOCK_SECONDS)) {
+            throw $this->toReconciliation($purchase, "{$failure}; another payment from this credit balance kept running, so it was left as it is");
+        }
+        try {
+            $creditBefore = $this->repo->getClientCredit($clientId);
+            $problem = $this->halfMadeProblem($purchase, $orderId, $serviceId, $invoiceId);
+            if ($problem === null) {
+                $left = $this->removeHalfMadeOrder($id, $orderId, $serviceId, $invoiceId);
+                if (abs($this->repo->getClientCredit($clientId) - $creditBefore) > 0.004) {
+                    $left[] = 'the credit balance changed';
+                }
+                $problem = $left === [] ? null : 'removing it left ' . implode(', ', $left);
+            }
+        } finally {
+            $this->purchases->unlock($lock);
+        }
+        if ($problem !== null) {
+            throw $this->toReconciliation($purchase, "{$failure}; {$problem}");
+        }
+
+        logActivity("Partner Hub: purchase #{$id}: {$failure}. Nothing was paid or provisioned: order #{$orderId} was deleted and"
+            . " its invoice #{$invoiceId} cancelled.", $clientId);
+        return $this->purchases->advance($id, PurchaseRepository::NEEDS_RECONCILIATION, PurchaseRepository::CREATED, [
+            'order_id'   => null,
+            'invoice_id' => null,
+            'service_id' => null,
+            'last_error' => mb_substr("{$failure} (removed unpaid)", 0, 2000),
+        ]);
+    }
+
+    /** Why a half-made order is not provably this purchase's and untouched, or null when it is. */
+    private function halfMadeProblem(array $purchase, int $orderId, int $serviceId, int $invoiceId): ?string
+    {
+        $clientId = (int) $purchase['client_id'];
+        $live = array_values(array_filter($this->purchases->markedAttempts((int) $purchase['id'], $clientId),
+            fn ($a) => !in_array($a['order_status'], ['Cancelled', 'Fraud'], true)));
+        if (count($live) !== 1 || $live[0]['service_id'] !== $serviceId || $live[0]['order_id'] !== $orderId) {
+            return 'it is not the only live attempt of this purchase';
+        }
+        if ($invoiceId === 0 || $this->purchases->serviceInvoiceIds($serviceId, $clientId) !== [$invoiceId]) {
+            return "no single invoice of service #{$serviceId} can be told apart";
+        }
+        $order = Capsule::table('tblorders')->where('id', $orderId)->where('userid', $clientId)->first(['status', 'amount']);
+        if ($order === null || $order->status !== 'Pending') {
+            return "order #{$orderId} is " . ($order->status ?? 'missing');
+        }
+        $services = Capsule::table('tblhosting')->where('orderid', $orderId)->get(['id', 'userid', 'packageid', 'domainstatus'])->all();
+        if (count($services) !== 1 || (int) $services[0]->id !== $serviceId || (int) $services[0]->userid !== $clientId
+            || (int) $services[0]->packageid !== (int) $purchase['product_id']) {
+            return "order #{$orderId} is not only service #{$serviceId} of this purchase's product";
+        }
+        if ($services[0]->domainstatus !== 'Pending') {
+            return "service #{$serviceId} is {$services[0]->domainstatus}";
+        }
+        if ($this->serviceProperty($serviceId, 'accessTokenId') !== '' || $this->serviceProperty($serviceId, 'bulkDelivery') === 'yes'
+            || Capsule::table('tblmodulequeue')->where('service_type', 'service')->where('service_id', $serviceId)->exists()) {
+            return "service #{$serviceId} shows a provisioning attempt";
+        }
+        $invoice = Capsule::table('tblinvoices')->where('id', $invoiceId)->where('userid', $clientId)->first(['status', 'total', 'credit']);
+        if ($invoice === null || $invoice->status !== 'Unpaid') {
+            return "invoice #{$invoiceId} is " . ($invoice->status ?? 'missing');
+        }
+        // Untouched means no transaction at all: a payment netted out by a refund is still one.
+        if (abs((float) $invoice->credit) > 0.004 || Capsule::table('tblaccounts')->where('invoiceid', $invoiceId)->exists()) {
+            return "invoice #{$invoiceId} carries a transaction";
+        }
+        $foreignLine = Capsule::table('tblinvoiceitems')->where('invoiceid', $invoiceId)
+            ->where(function ($q) use ($serviceId) {
+                $q->whereNotIn('type', ['Hosting', 'PromoHosting'])->orWhereNull('relid')->orWhere('relid', '!=', $serviceId);
+            })->exists();
+        if ($foreignLine || abs((float) $invoice->total - (float) $order->amount) > 0.004) {
+            return "invoice #{$invoiceId} bills more than order #{$orderId}";
+        }
+        return null;
+    }
+
+    /**
+     * Remove an untouched half-made order: its invoice first — DeleteOrder leaves an invoice its
+     * order does not name — and the order only once the invoice is verified cancelled. Complete
+     * means the order and its service are gone and the invoice is Cancelled with no money on it.
+     *
+     * @return string[] what is left behind; empty when the removal is complete
+     */
+    private function removeHalfMadeOrder(int $purchaseId, int $orderId, int $serviceId, int $invoiceId): array
+    {
+        $cancelInvoice = LocalApi::tryCall('UpdateInvoice', ['invoiceid' => $invoiceId, 'status' => 'Cancelled']);
+        $cancelled = (string) Capsule::table('tblinvoices')->where('id', $invoiceId)->value('status') === 'Cancelled';
+        $cancel = $delete = null;
+        if ($cancelled) {
+            $cancel = LocalApi::tryCall('CancelOrder', ['orderid' => $orderId, 'cancelsub' => false]);
+            $delete = LocalApi::tryCall('DeleteOrder', ['orderid' => $orderId]);
+        }
+        $this->repo->log(
+            (int) $this->partner['id'],
+            'rollback',
+            null,
+            0,
+            ['orderid' => $orderId, 'invoiceid' => $invoiceId, 'purchase' => $purchaseId],
+            ['cancelInvoice' => $cancelInvoice, 'cancel' => $cancel, 'delete' => $delete]
+        );
+
+        $left = [];
+        $invoiceStatus = (string) Capsule::table('tblinvoices')->where('id', $invoiceId)->value('status');
+        if ($invoiceStatus !== 'Cancelled') {
+            $left[] = "invoice #{$invoiceId} is " . ($invoiceStatus ?: 'missing');
+        }
+        $orderStatus = (string) Capsule::table('tblorders')->where('id', $orderId)->value('status');
+        if ($orderStatus !== '') {
+            $left[] = "order #{$orderId} is {$orderStatus}";
+        }
+        $serviceStatus = (string) Capsule::table('tblhosting')->where('id', $serviceId)->value('domainstatus');
+        if ($serviceStatus !== '') {
+            $left[] = "service #{$serviceId} is {$serviceStatus}";
+        }
+        if ($this->invoicePayments($invoiceId, true) > 0.004) {
+            $left[] = "invoice #{$invoiceId} holds payments";
+        }
+        return $left;
     }
 
     private function provision(array $purchase): array
@@ -749,11 +952,17 @@ class PurchaseProcessor
         $clientId = (int) $purchase['client_id'];
         $marked = $this->purchases->markedService($id, $clientId);
         if ($marked !== null) {
-            return $this->purchases->advance($id, PurchaseRepository::CREATED, PurchaseRepository::ORDERED, [
+            if (!$marked['invoice_linked'] && !$this->isFreeOrder((int) $marked['order_id'], (int) $marked['service_id'], $clientId)) {
+                // Removed, it is replaced here: that is this request's one new order.
+                return $this->addOrder($this->recoverHalfMadeOrder($purchase, $marked, 'the request placing order #'
+                    . (int) $marked['order_id'] . ' stopped inside AddOrder, before the order named its invoice'), false);
+            }
+            // The adopted order passes the same payment check as a resume from 'ordered'.
+            return $this->verifyPayment($this->purchases->advance($id, PurchaseRepository::CREATED, PurchaseRepository::ORDERED, [
                 'order_id'   => (int) $marked['order_id'],
                 'invoice_id' => (int) $marked['invoice_id'] ?: null,
                 'service_id' => (int) $marked['service_id'],
-            ]);
+            ]));
         }
         // AddOrder dying between the order and its custom fields would leave an order that no
         // purchase accounts for. Any such order since this purchase began makes "not ordered" unprovable.
@@ -826,6 +1035,47 @@ class PurchaseProcessor
     }
 
     // -- Helpers -------------------------------------------------------------------
+
+    /**
+     * The ids a row lacks, from what WHMCS holds: the marked order when the row names none (a
+     * request that stopped inside AddOrder saved nothing), and the invoice of an order that does
+     * not name its own.
+     */
+    private function recordMarkedIds(array $purchase): array
+    {
+        $id = (int) $purchase['id'];
+        $clientId = (int) $purchase['client_id'];
+        if ((int) $purchase['order_id'] === 0) {
+            $marked = $this->purchases->markedService($id, $clientId);
+            if ($marked === null) {
+                return $purchase;
+            }
+            return $this->purchases->setState($id, $purchase['state'], [
+                'order_id'   => (int) $marked['order_id'],
+                'invoice_id' => (int) $marked['invoice_id'] ?: null,
+                'service_id' => (int) $marked['service_id'],
+            ]);
+        }
+        if ((int) $purchase['invoice_id'] === 0 && (int) $purchase['service_id'] > 0) {
+            $invoiceId = (int) Capsule::table('tblorders')->where('id', (int) $purchase['order_id'])->value('invoiceid')
+                ?: $this->purchases->soleServiceInvoiceId((int) $purchase['service_id'], $clientId);
+            if ($invoiceId > 0) {
+                return $this->purchases->setState($id, $purchase['state'], ['invoice_id' => $invoiceId]);
+            }
+        }
+        return $purchase;
+    }
+
+    /**
+     * A free order: WHMCS creates no invoice for one. An order that charges, or that an invoice
+     * bills, is never taken as paid for lacking an invoice id.
+     */
+    private function isFreeOrder(int $orderId, int $serviceId, int $clientId): bool
+    {
+        $amount = Capsule::table('tblorders')->where('id', $orderId)->where('userid', $clientId)->value('amount');
+        return is_numeric($amount) && (float) $amount >= 0 && (float) $amount < 0.005
+            && $this->purchases->serviceInvoiceIds($serviceId, $clientId) === [];
+    }
 
     private function guardLegacy(string $reference): void
     {

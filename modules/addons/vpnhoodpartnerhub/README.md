@@ -326,7 +326,12 @@ invoice and service, says what went wrong, and offers:
   returns it). It accepts a still-Pending order without running the module. It never orders,
   pays or provisions.
 - **Release** — closes an unfinished purchase as rolled back, which frees its key. Refused
-  while an order or payment it made still exists, unless **Refund done** is ticked.
+  while an order, a service or an Unpaid invoice of it is still live (cancel them first), and
+  while a payment it made remains, unless **Refund done** is ticked.
+
+An order WHMCS's `AddOrder` failed to finish — it can stop after creating the order and its
+invoice — never reaches this list when nothing of it was paid: the Hub removes it and orders
+again. It is listed, with its order, invoice and service, only when it was touched.
 
 **Paid but not provisioned** is fixed on the service itself, and the page spells out the
 procedure: establish what the original token creation did before anything creates a token
