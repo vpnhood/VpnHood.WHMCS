@@ -2,7 +2,7 @@
   "schema": "1.1",
   "type": "whmcs-servers",
   "name": "vpnhoodstore",
-  "version": "1.2.30",
+  "version": "1.2.31",
   "license": "free",
   "category": "digitalservices",
   "description": {
