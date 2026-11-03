@@ -71,7 +71,8 @@ CSV delivery does **not** — bulk keys are read back by `customerId` + `orderId
 ### `modules/addons/vpnhoodconfig/` (addon)
 Global settings store (API Key, Project ID, reseller restriction settings) in
 `tbladdonmodules`. Also drives the product-visibility hook
-`includes/hooks/vpnhoodstore-restrict-user-group-products.php`.
+`includes/hooks/vpnhoodstore-restrict-user-group-products.php`, the refund memory's months and
+the ticket-IP option below.
 
 ### `includes/hooks/` — the refund hooks
 Two `InvoiceRefunded` hooks, which ship with every hub install:
@@ -92,6 +93,17 @@ Two `InvoiceRefunded` hooks, which ship with every hub install:
   whose client's address is remembered; it blocks nothing — WHMCS has no hook that runs before a
   refund — so the admin decides. Covered by `tests/integration/refund-memory.test.sh`; the
   terminate hook by `default-key.test.sh`.
+
+### `includes/hooks/vpnhood-ticket-ip.php` — Clear Ticket IP Addresses
+WHMCS records the client's IP on the message that opens a ticket from the client area
+(`tbltickets.ipaddress`; one opened through the API carries none), shows it under that message to
+the client and in the admin area, and keeps one on each ticket rating (`tblticketfeedback.ip`);
+no WHMCS setting turns it off. With **Clear Ticket IP Addresses** on in VpnHood! MANAGER
+Configuration (off while unset), `TicketOpen` and `TicketOpenAdmin` clear the new ticket's IP, and
+the daily cron clears what is left: ratings, which no hook announces, and tickets stored before.
+No localAPI command writes either column, so both are written directly. Covered by
+`tests/integration/ticket-ip.test.sh` (the hooks and the daily run) and
+`tests/e2e/ticket-ip.spec.mjs` (a ticket opened from the client area, where WHMCS records the IP).
 
 ### `modules/addons/vpnhoodverify/` (addon) — forced email verification
 Makes email verification mandatory for the client area. WHMCS's own
@@ -652,7 +664,8 @@ The integration suites in `tests/integration/` run against the dev WHMCS (see it
 `connector-idempotency.test.sh` (the connector's side, and both directions of compatibility
 with the previous releases), `refund.test.sh` (refunds, the service-action lock and the ended
 guards, the connector's Refund button), `refund-memory.test.sh` (the refund memory and its
-warning), `low-credit-alert.test.sh` (the low-credit email), plus the buyer lifecycle scripts.
+warning), `low-credit-alert.test.sh` (the low-credit email), `ticket-ip.test.sh` (Clear Ticket IP
+Addresses), plus the buyer lifecycle scripts.
 `tests/unit/run.sh` runs the unit tests (pure PHP, e.g. `RefundPolicy`) with the dev box's PHP,
 since there is none locally. By hand, against a live WHMCS:
 

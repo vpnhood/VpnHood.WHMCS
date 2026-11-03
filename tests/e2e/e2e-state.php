@@ -18,7 +18,11 @@
  * `paid-key` places a real key paid by a transaction, for the admin Refund form;
  * `service-state <id>` prints a service's status and whether its key is enabled.
  *
- * Usage: E2E_CLIENT_PASSWORD=… php e2e-state.php <clean|onetime-key|renewing|bulk|paid-key|service-state <id>|held-client|verify-token <email>|drop-verify-clients>
+ * `ticket-ip-setting <on|off|unset>` sets Clear Ticket IP Addresses and prints what it was;
+ * `newest-ticket` prints the client's newest ticket and whether it keeps an IP; `drop-tickets`
+ * deletes the client's tickets (`clean` does too).
+ *
+ * Usage: E2E_CLIENT_PASSWORD=… php e2e-state.php <clean|onetime-key|renewing|bulk|paid-key|service-state <id>|held-client|verify-token <email>|drop-verify-clients|ticket-ip-setting <on|off|unset>|newest-ticket|drop-tickets>
  */
 
 require '/home/whmcsdev/web/whmcs-dev.vpnhood.com/public_html/init.php';
@@ -49,6 +53,16 @@ function api(string $command, array $params): array
 }
 
 /** Place an order for the e2e client; returns [orderId, serviceId, invoiceId]. */
+/** Delete every ticket of the client (DeleteTicket takes replies and ratings with it); the count deleted. */
+function dropTickets(int $clientId): int
+{
+    $ticketIds = Capsule::table('tbltickets')->where('userid', $clientId)->pluck('id')->all();
+    foreach ($ticketIds as $ticketId) {
+        localAPI('DeleteTicket', ['ticketid' => (int) $ticketId]);
+    }
+    return count($ticketIds);
+}
+
 function placeOrder(int $clientId, int $productId, bool $autosetup): array
 {
     $add = api('AddOrder', [
@@ -152,7 +166,30 @@ switch ($scenario) {
             Capsule::table('tblinvoiceitems')->where('invoiceid', (int) $invoiceId)->delete();
             Capsule::table('tblinvoices')->where('id', (int) $invoiceId)->delete();
         }
-        echo json_encode(['clientId' => $clientId, 'cleaned' => count($services)]) . "\n";
+        echo json_encode(['clientId' => $clientId, 'cleaned' => count($services), 'tickets' => dropTickets($clientId)]) . "\n";
+        break;
+
+    case 'ticket-ip-setting':
+        // Clear Ticket IP Addresses as VpnHood! MANAGER Configuration stores it: on, off ('') or
+        // unset (no row); prints what it was, which the spec puts back
+        $previous = Capsule::table('tbladdonmodules')->where('module', 'vpnhoodconfig')
+            ->where('setting', 'ClearTicketIpAddresses')->value('value');
+        $wanted = $argv[2] ?? '';
+        Capsule::table('tbladdonmodules')->where('module', 'vpnhoodconfig')->where('setting', 'ClearTicketIpAddresses')->delete();
+        if ($wanted !== 'unset') {
+            Capsule::table('tbladdonmodules')->insert(['module' => 'vpnhoodconfig', 'setting' => 'ClearTicketIpAddresses',
+                'value' => $wanted === 'on' ? 'on' : '']);
+        }
+        echo json_encode(['previous' => $previous ?? 'unset']) . "\n";
+        break;
+    case 'newest-ticket':
+        // the e2e client's newest ticket, and whether WHMCS keeps an IP on it (never the IP itself)
+        $ticket = Capsule::table('tbltickets')->where('userid', $clientId)->orderByDesc('id')->first(['id', 'tid', 'c', 'ipaddress']);
+        echo json_encode($ticket === null ? null : ['id' => (int) $ticket->id, 'tid' => (string) $ticket->tid,
+            'c' => (string) $ticket->c, 'hasIp' => (string) $ticket->ipaddress !== '']) . "\n";
+        break;
+    case 'drop-tickets':
+        echo json_encode(['dropped' => dropTickets($clientId)]) . "\n";
         break;
 
     case 'onetime-key':

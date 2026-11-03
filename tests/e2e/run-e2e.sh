@@ -2,8 +2,8 @@
 #
 # run-e2e.sh — browser (Playwright) tests for the hub store flows, against the
 # DEV WHMCS only: the checkout warning's three voices, the reseller CSV
-# delivery, the email-verification checkout hold and the admin Refund form's
-# Reverse Payment box. Uploads e2e-state.php to
+# delivery, the email-verification checkout hold, the admin Refund form's
+# Reverse Payment box and the ticket IP option. Uploads e2e-state.php to
 # the dev box (the specs drive scenarios
 # through it over SSH), installs Playwright on first run, and cleans up after.
 #

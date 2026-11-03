@@ -49,6 +49,12 @@ function vpnhoodconfig_config()
                 'Description'  => 'How long a full website refund is remembered, to warn on the next invoice of the same email address. Enter what your privacy policy promises.',
                 'Default'      => '24'
             ],
+
+            'ClearTicketIpAddresses' => [
+                'FriendlyName' => 'Clear Ticket IP Addresses',
+                'Type'         => 'yesno',
+                'Description'  => 'Keep no IP address on tickets. WHMCS records the client\'s IP when they open a ticket and shows it under the first message, to the client and in the admin area: it is cleared as the ticket opens, and the daily cron clears those already stored and those on ticket ratings.',
+            ],
         ]
     ];
 }

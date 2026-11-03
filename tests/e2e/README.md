@@ -15,7 +15,9 @@ Playwright-driven scripts against `https://whmcs-dev.vpnhood.com`. Two kinds liv
   hook that does the holding is covered by `tests/integration/verify-checkout.test.sh`.
   `refund` refunds two paid keys in full through the admin Refund form: Reverse Payment
   unticked keeps the key enabled and the service Active, ticked ends both. It signs in to the
-  admin area with `adminUser`/`adminPassword`.
+  admin area with `adminUser`/`adminPassword`. `ticket-ip` opens a ticket from the client area
+  with Clear Ticket IP Addresses off (WHMCS keeps the IP and shows it) and on (none kept, none
+  shown).
 
   A cart test must order a product whose group leaves at least one payment method, since
   WHMCS refuses an order whose product group disables every gateway.
