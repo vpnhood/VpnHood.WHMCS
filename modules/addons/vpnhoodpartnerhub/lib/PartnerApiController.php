@@ -624,7 +624,8 @@ class PartnerApiController
         }
 
         $default = $this->billingCycleName((int) $mapping['billing_cycle_months']);
-        $requested = strtolower(trim($requested));
+        // the connector relays the service's cycle as WHMCS stores it ("Semi-Annually")
+        $requested = RenewalPolicy::orderCycleName($requested);
         if ($requested === '' || $requested === $default) {
             return $default;
         }

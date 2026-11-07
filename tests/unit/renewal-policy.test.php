@@ -40,6 +40,14 @@ same(RenewalPolicy::cycleMonths('Triennially'), 36, 'Triennially is 36 months');
 same(RenewalPolicy::cycleMonths('One Time'), 0, 'One Time never renews');
 same(RenewalPolicy::cycleMonths('Free Account'), 0, 'Free Account never renews');
 
+// -- the cycle a connector relays, as AddOrder names it ------------------------------------
+same(RenewalPolicy::orderCycleName('Semi-Annually'), 'semiannually', 'a service\'s Semi-Annually is AddOrder\'s semiannually');
+same(RenewalPolicy::orderCycleName('semiannually'), 'semiannually', 'an AddOrder name stays as it is');
+same(RenewalPolicy::orderCycleName(' Monthly '), 'monthly', 'Monthly is monthly, spaces trimmed');
+same(RenewalPolicy::orderCycleName('Annually'), 'annually', 'Annually is annually');
+same(RenewalPolicy::orderCycleName('One Time'), 'onetime', 'One Time is onetime');
+same(RenewalPolicy::orderCycleName(''), '', 'no cycle stays empty');
+
 // -- months the way WHMCS adds them (31 Aug + 1 month = 1 Oct, seen on production) -----------
 same(RenewalPolicy::addMonths('2026-10-21', 1), '2026-11-21', 'a month later, same day');
 same(RenewalPolicy::addMonths('2026-08-31', 1), '2026-10-01', 'a day the next month lacks overflows, as WHMCS does');

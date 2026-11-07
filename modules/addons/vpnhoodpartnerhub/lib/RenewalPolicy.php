@@ -26,6 +26,16 @@ final class RenewalPolicy
     }
 
     /**
+     * A billing cycle as AddOrder names it ("semiannually"), from any form WHMCS writes it in:
+     * a service stores "Semi-Annually" and "One Time", which a plain strtolower turns into
+     * "semi-annually" and "one time", names no cycle map knows.
+     */
+    public static function orderCycleName(string $billingCycle): string
+    {
+        return strtolower(str_replace(['-', ' '], '', trim($billingCycle)));
+    }
+
+    /**
      * A full cycle or more is still paid: renewing now would hold two, so it charges nothing.
      * Measured back from the due date (the term's last cycle has not started), not forward from
      * today: overflowing months are not monotonic (31 Jan + 1 month = 3 Mar, 1 Feb + 1 month =
