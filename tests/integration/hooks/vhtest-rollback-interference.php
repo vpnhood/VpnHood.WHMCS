@@ -12,7 +12,8 @@ if (!defined('WHMCS')) {
 }
 
 add_hook('CancelOrder', 1, function ($vars) {
-    if (!is_file('/home/whmcsdev/tmp/vhtest-rollback-interference')) {
+    // the flag is in ~/tmp: the web root is ~/web/<site>/public_html
+    if (!is_file(dirname(ROOTDIR, 3) . '/tmp/vhtest-rollback-interference')) {
         return;
     }
     $clientId = (int) WHMCS\Database\Capsule::table('tblorders')->where('id', (int) ($vars['orderid'] ?? 0))->value('userid');

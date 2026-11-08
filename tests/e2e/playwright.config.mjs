@@ -1,12 +1,13 @@
 import { defineConfig } from '@playwright/test';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { DEV_HOST, DEV_URL } from './lib/dev-server.mjs';
 
-const baseURL = process.env.WHMCS_DEV_URL ?? 'https://whmcs-dev.vpnhood.com';
+const baseURL = DEV_URL;
 
 // browser tests run ONLY against the dev install — never production
-if (baseURL.includes('account.vpnhood.com') || !baseURL.includes('whmcs-dev')) {
-  throw new Error(`REFUSED: e2e tests run only against whmcs-dev, got: ${baseURL}`);
+if (baseURL.includes('account.vpnhood.com') || !baseURL.includes(DEV_HOST)) {
+  throw new Error(`REFUSED: e2e tests run only against the dev WHMCS, got: ${baseURL}`);
 }
 
 export default defineConfig({

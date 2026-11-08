@@ -9,23 +9,21 @@
 // It does NOT save — the browser stays open so you can review and click
 // Save Changes yourself. Ctrl+C in the terminal closes it.
 //
-// Credentials: <Vh root>/.user/account-dev.vpnhood.com/secrets.json
+// Credentials: the secrets file <Vh root>/.user/whmcs/dev.env names
 //   { "adminUser": "...", "adminPassword": "..." }
 // (or env WHMCS_ADMIN_USER / WHMCS_ADMIN_PASSWORD).
 //
 // Config (env, optional):
-//   WHMCS_DEV_URL       default https://whmcs-dev.vpnhood.com
+//   WHMCS_DEV_URL       default from <Vh root>/.user/whmcs/dev.env
 //   HUB_ORDER_GATEWAY   default banktransfer
 
 import { chromium } from 'playwright';
 import { readFileSync } from 'node:fs';
-import { fileURLToPath } from 'node:url';
-import { dirname, join } from 'node:path';
+import { DEV_SECRETS, DEV_URL } from './lib/dev-server.mjs';
 
-const HERE = dirname(fileURLToPath(import.meta.url));
-const SECRETS_PATH = join(HERE, '..', '..', '..', '.user', 'account-dev.vpnhood.com', 'secrets.json');
+const SECRETS_PATH = DEV_SECRETS;
 
-const BASE_URL = (process.env.WHMCS_DEV_URL ?? 'https://whmcs-dev.vpnhood.com').replace(/\/$/, '');
+const BASE_URL = DEV_URL;
 const ORDER_GATEWAY = process.env.HUB_ORDER_GATEWAY ?? 'banktransfer';
 const MODULE = 'vpnhoodpartnerhub';
 

@@ -25,9 +25,30 @@
  * Usage: E2E_CLIENT_PASSWORD=… php e2e-state.php <clean|onetime-key|renewing|bulk|paid-key|service-state <id>|held-client|verify-token <email>|drop-verify-clients|ticket-ip-setting <on|off|unset>|newest-ticket|drop-tickets>
  */
 
-require '/home/whmcsdev/web/whmcs-dev.vpnhood.com/public_html/init.php';
-require_once '/home/whmcsdev/web/whmcs-dev.vpnhood.com/public_html/modules/servers/vpnhoodstore/lib/AsyncApiClientFactory.php';
-require_once '/home/whmcsdev/web/whmcs-dev.vpnhood.com/public_html/modules/servers/vpnhoodstore/lib/ApiService.php';
+/**
+ * The dev WHMCS's web root. This repo is public and never names the server, so the box itself is
+ * asked: WHMCS_DEV_WEBROOT when a runner passes it, otherwise the one WHMCS install under ~/web
+ * (~/web/<site>/public_html).
+ */
+function devWebroot(): string
+{
+    $root = getenv('WHMCS_DEV_WEBROOT');
+    if ($root) {
+        return rtrim($root, '/');
+    }
+    $found = glob(getenv('HOME') . '/web/*/public_html/configuration.php') ?: [];
+    if (count($found) !== 1) {
+        fwrite(STDERR, 'expected one WHMCS install under ~/web, found ' . count($found) . "; set WHMCS_DEV_WEBROOT\n");
+        exit(1);
+    }
+    return dirname($found[0]);
+}
+
+define('WEBROOT', devWebroot());
+
+require WEBROOT . '/init.php';
+require_once WEBROOT . '/modules/servers/vpnhoodstore/lib/AsyncApiClientFactory.php';
+require_once WEBROOT . '/modules/servers/vpnhoodstore/lib/ApiService.php';
 
 use WHMCS\Database\Capsule;
 use WHMCS\Module\Server\VpnHoodStore\ApiService;

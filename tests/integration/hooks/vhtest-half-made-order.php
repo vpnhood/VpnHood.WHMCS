@@ -13,7 +13,7 @@ if (!defined('WHMCS')) {
 }
 
 add_hook('InvoiceCreated', 1, function ($vars) {
-    $flag = '/home/whmcsdev/tmp/vhtest-half-made-order';
+    $flag = dirname(ROOTDIR, 3) . '/tmp/vhtest-half-made-order'; // ~/tmp: the web root is ~/web/<site>/public_html
     if (!is_file($flag)) {
         return;
     }

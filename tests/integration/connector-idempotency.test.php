@@ -18,7 +18,7 @@ use WHMCS\Database\Capsule;
 
 const CONNECTOR_SLUG = 'partner-one-month-premium-code';
 const HUB_PRICE      = 1.75;
-const RESULTS_DIR    = '/home/whmcsdev/tmp/vhci';
+const RESULTS_DIR    = DEV_TMP . '/vhci';
 
 $buyer = clientByEmail($db, BUYER_EMAIL);
 $reseller = clientByEmail($db, RESELLER_EMAIL);

@@ -8,7 +8,7 @@
 #
 # Needs SSH (the ssh command array) and REPO_ROOT from the caller.
 
-WEBROOT="${WHMCS_DEV_WEBROOT:-/home/whmcsdev/web/whmcs-dev.vpnhood.com/public_html}"
+WEBROOT="$WHMCS_DEV_WEBROOT"
 OLD_ONLY_HOOKS=()
 
 # <old release dir>: call after extracting the release, before deploying it

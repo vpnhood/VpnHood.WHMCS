@@ -26,7 +26,7 @@ config pointed at this Hub, the partner-shop products, and the **buyer** client
 connector share the one dev WHMCS; the connector reaches the Hub over HTTPS
 like any external partner would.
 
-Credentials live in `<Vh root>/.user/account-dev.vpnhood.com/secrets.json` (`partnerApiKey`,
+Credentials live in the secrets file `<Vh root>/.user/whmcs/dev.env` names (`partnerApiKey`,
 `partnerApiSecret`, `testClientPassword` are generated on first run; `adminUser`
 / `adminPassword` are for the e2e admin scripts). The script also regenerates
 `tests/integration/.env`, so `tests/integration/hub-api.test.sh` runs directly

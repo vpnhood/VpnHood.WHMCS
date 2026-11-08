@@ -33,7 +33,7 @@ const REF_ONETIME    = 'reseller-one-month-premium-code';
 const REF_RECURRING  = 'reseller-one-month-premium-code-subscription';
 const CONNECTOR_SLUG = 'partner-one-month-premium-code';
 const PRICE          = 1.75;
-const RESULTS_DIR    = '/home/whmcsdev/tmp/vhrf';
+const RESULTS_DIR    = DEV_TMP . '/vhrf';
 
 $reseller = clientByEmail($db, RESELLER_EMAIL);
 $buyer = clientByEmail($db, BUYER_EMAIL);

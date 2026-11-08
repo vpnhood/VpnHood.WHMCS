@@ -38,9 +38,9 @@ const REF_ONETIME   = 'reseller-one-month-premium-code';
 const REF_RECURRING = 'reseller-one-month-premium-code-subscription';
 const REF_CSV       = 'reseller-bulk-csv-premium-code';
 const PRICE         = 1.75;
-const RESULTS_DIR   = '/home/whmcsdev/tmp/vhrt';
-const FAIL_FLAG     = '/home/whmcsdev/tmp/vhtest-rollback-interference';
-const HALF_FLAG     = '/home/whmcsdev/tmp/vhtest-half-made-order';
+const RESULTS_DIR   = DEV_TMP . '/vhrt';
+const FAIL_FLAG     = DEV_TMP . '/vhtest-rollback-interference';
+const HALF_FLAG     = DEV_TMP . '/vhtest-half-made-order';
 
 $reseller = clientByEmail($db, RESELLER_EMAIL);
 $partnerRow = $reseller ? Capsule::table('mod_vpnhood_partners')->where('client_id', $reseller['id'])->first() : null;

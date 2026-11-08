@@ -1,8 +1,7 @@
 #!/usr/bin/env bash
 #
-# deploy-dev.sh — publish the VpnHood WHMCS modules to the dev WHMCS
-# (https://whmcs-dev.vpnhood.com), so tests always run against the
-# current working tree.
+# deploy-dev.sh — publish the VpnHood WHMCS modules to the dev WHMCS, so
+# tests always run against the current working tree.
 #
 # Usage:
 #   scripts/deploy-dev.sh [hub|partner|iap|all]
@@ -22,9 +21,9 @@
 #
 # Config (env vars, all optional):
 #   WHMCS_DEV_SSH_KEY   default <Vh root>/.user/ssh/ssh.openssh
-#   WHMCS_DEV_SSH_HOST  default whmcsdev@webhost-ftps.vpnhood.com
-#   WHMCS_DEV_WEBROOT   default /home/whmcsdev/web/whmcs-dev.vpnhood.com/public_html
-#   WHMCS_DEV_URL       default https://whmcs-dev.vpnhood.com
+#   WHMCS_DEV_SSH_HOST, WHMCS_DEV_WEBROOT, WHMCS_DEV_URL
+#                       default from <Vh root>/.user/whmcs/dev.env, which names the
+#                       dev server so this public repo never does (scripts/dev-server.sh)
 #   PARTNER_REPO        default <Vh root>/VpnHood.WHMCS.Partner
 #   IAP_REPO            default <Vh root>/VpnHood.WHMCS.Iap
 
@@ -46,13 +45,14 @@ case "$TARGET" in
   *) echo "Usage: $0 [hub|partner|iap|all]" >&2; exit 2 ;;
 esac
 
+. "$REPO_ROOT/scripts/dev-server.sh"  # the dev WHMCS's names, from <Vh root>/.user/whmcs/dev.env
 SSH_KEY="${WHMCS_DEV_SSH_KEY:-$VH_ROOT/.user/ssh/ssh.openssh}"
-SSH_HOST="${WHMCS_DEV_SSH_HOST:-whmcsdev@webhost-ftps.vpnhood.com}"
-WEBROOT="${WHMCS_DEV_WEBROOT:-/home/whmcsdev/web/whmcs-dev.vpnhood.com/public_html}"
-SITE_URL="${WHMCS_DEV_URL:-https://whmcs-dev.vpnhood.com}"
+SSH_HOST="$WHMCS_DEV_SSH_HOST"
+WEBROOT="$WHMCS_DEV_WEBROOT"
+SITE_URL="$WHMCS_DEV_URL"
 # tests and dev deploys run ONLY against the dev box — never production (account.vpnhood.com)
 case "${SSH_HOST:-}${SITE_URL:-}${WHMCS_DEV_URL:-}" in *account.vpnhood.com*) echo "!! REFUSED: production host detected" >&2; exit 1;; esac
-case "${SSH_HOST:-}" in *whmcsdev@*) ;; "") ;; *) echo "!! REFUSED: only whmcsdev@… (the dev box) is allowed, got: $SSH_HOST" >&2; exit 1;; esac
+case "${SSH_HOST:-}" in *"$WHMCS_DEV_SSH_USER@"*) ;; "") ;; *) echo "!! REFUSED: only $WHMCS_DEV_SSH_USER@… (the dev box) is allowed, got: $SSH_HOST" >&2; exit 1;; esac
 PARTNER_REPO="${PARTNER_REPO:-$VH_ROOT/VpnHood.WHMCS.Partner}"
 IAP_REPO="${IAP_REPO:-$VH_ROOT/VpnHood.WHMCS.Iap}"
 

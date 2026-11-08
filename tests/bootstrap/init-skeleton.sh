@@ -4,7 +4,7 @@
 #
 # Idempotent; call it at the start of any test run. It:
 #   1. ensures partnerApiKey / partnerApiSecret / testClientPassword exist in
-#      <Vh root>/.user/account-dev.vpnhood.com/secrets.json (generates them on first run)
+#      the secrets file <Vh root>/.user/whmcs/dev.env names (generates them on first run)
 #   2. uploads skeleton.php + fixtures.json to the dev box and runs it there
 #      (direct-DB, create-if-missing — see fixtures.json for what it ensures)
 #   3. regenerates tests/integration/.env from secrets.json
@@ -17,13 +17,14 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 VH_ROOT="$(cd "$REPO_ROOT/.." && pwd)"
 
+. "$REPO_ROOT/scripts/dev-server.sh"  # the dev WHMCS's names, from <Vh root>/.user/whmcs/dev.env
 SSH_KEY="${WHMCS_DEV_SSH_KEY:-$VH_ROOT/.user/ssh/ssh.openssh}"
-SSH_HOST="${WHMCS_DEV_SSH_HOST:-whmcsdev@webhost-ftps.vpnhood.com}"
-SITE_URL="${WHMCS_DEV_URL:-https://whmcs-dev.vpnhood.com}"
+SSH_HOST="$WHMCS_DEV_SSH_HOST"
+SITE_URL="$WHMCS_DEV_URL"
 # tests and dev deploys run ONLY against the dev box — never production (account.vpnhood.com)
 case "${SSH_HOST:-}${SITE_URL:-}${WHMCS_DEV_URL:-}" in *account.vpnhood.com*) echo "!! REFUSED: production host detected" >&2; exit 1;; esac
-case "${SSH_HOST:-}" in *whmcsdev@*) ;; "") ;; *) echo "!! REFUSED: only whmcsdev@… (the dev box) is allowed, got: $SSH_HOST" >&2; exit 1;; esac
-SECRETS="$VH_ROOT/.user/account-dev.vpnhood.com/secrets.json"
+case "${SSH_HOST:-}" in *"$WHMCS_DEV_SSH_USER@"*) ;; "") ;; *) echo "!! REFUSED: only $WHMCS_DEV_SSH_USER@… (the dev box) is allowed, got: $SSH_HOST" >&2; exit 1;; esac
+SECRETS="$WHMCS_DEV_SECRETS"
 
 [ -f "$SSH_KEY" ] || { echo "SSH key not found: $SSH_KEY" >&2; exit 1; }
 [ -f "$SECRETS" ] || { echo "secrets file not found: $SECRETS" >&2; exit 1; }

@@ -15,7 +15,28 @@
  */
 
 error_reporting(E_ALL);
-const WEBROOT = '/home/whmcsdev/web/whmcs-dev.vpnhood.com/public_html';
+
+/**
+ * The dev WHMCS's web root. This repo is public and never names the server, so the box itself is
+ * asked: WHMCS_DEV_WEBROOT when a runner passes it, otherwise the one WHMCS install under ~/web
+ * (~/web/<site>/public_html).
+ */
+function devWebroot(): string
+{
+    $root = getenv('WHMCS_DEV_WEBROOT');
+    if ($root) {
+        return rtrim($root, '/');
+    }
+    $found = glob(getenv('HOME') . '/web/*/public_html/configuration.php') ?: [];
+    if (count($found) !== 1) {
+        fwrite(STDERR, 'expected one WHMCS install under ~/web, found ' . count($found) . "; set WHMCS_DEV_WEBROOT\n");
+        exit(1);
+    }
+    return dirname($found[0]);
+}
+
+define('WEBROOT', devWebroot());
+define('DEV_TMP', getenv('HOME') . '/tmp'); // ~/tmp: the runners' and the test hooks' flags and results
 
 const BUYER_EMAIL    = 'test-buyer@vpnhood.com';
 const RESELLER_EMAIL = 'test-reseller@vpnhood.com';

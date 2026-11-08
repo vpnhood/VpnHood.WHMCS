@@ -25,7 +25,7 @@ use WHMCS\Module\Addon\VpnHoodPartnerHub\PartnerRepository;
 const REF_RECURRING = 'reseller-one-month-premium-code-subscription';
 const PRICE         = 1.75;
 const QUIET_SECONDS = 5; // how long a step that sends nothing is watched
-const SLOW_MAIL_FLAG = '/home/whmcsdev/tmp/vhtest-slow-mail'; // while it exists, the hook delays the email
+const SLOW_MAIL_FLAG = DEV_TMP . '/vhtest-slow-mail'; // while it exists, the hook delays the email
 const SLOW_MAIL_SECONDS = 10;
 
 $reseller = clientByEmail($db, RESELLER_EMAIL);

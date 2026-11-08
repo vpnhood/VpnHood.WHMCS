@@ -11,7 +11,8 @@ if (!defined('WHMCS')) {
 }
 
 add_hook('EmailPreSend', 1, function ($vars) {
-    if (($vars['messagename'] ?? '') === 'VpnHood Partner Low Credit' && is_file('/home/whmcsdev/tmp/vhtest-slow-mail')) {
+    // the flag is in ~/tmp: the web root is ~/web/<site>/public_html
+    if (($vars['messagename'] ?? '') === 'VpnHood Partner Low Credit' && is_file(dirname(ROOTDIR, 3) . '/tmp/vhtest-slow-mail')) {
         sleep(10);
     }
 });

@@ -127,7 +127,7 @@ The checkout hold has three automated checks (deploy first with `scripts/deploy-
 
 Paying that invoice happens on the gateway's own page; step 7 below covers it by hand.
 
-For the rest, deploy with `scripts/deploy-dev.sh hub`, then at `https://whmcs-dev.vpnhood.com`:
+For the rest, deploy with `scripts/deploy-dev.sh hub`, then on the dev WHMCS:
 
 1. Addon inactive → the client area behaves normally (proves the kill switch).
 2. Activate; confirm the admin page shows the cutoff stamped with today and enforcement

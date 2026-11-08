@@ -1,6 +1,7 @@
 # Browser (e2e) tooling — dev WHMCS
 
-Playwright-driven scripts against `https://whmcs-dev.vpnhood.com`. Two kinds live here:
+Playwright-driven scripts against the dev WHMCS, which `<Vh root>/.user/whmcs/dev.env` names
+(`lib/dev-server.mjs` reads it). Two kinds live here:
 
 - **Visual prep scripts** (`*-configure.mjs`) — open a headed browser, drive the admin
   UI up to a point, then **stop and leave the browser open** so a human reviews and
@@ -29,8 +30,8 @@ cd tests/e2e
 npm install
 ```
 
-Admin credentials go in `<Vh root>/.user/account-dev.vpnhood.com/secrets.json` (outside the repo,
-next to the SSH key):
+Admin credentials go in the secrets file `<Vh root>/.user/whmcs/dev.env` names (outside the
+repo, like the SSH key):
 
 ```json
 { "adminUser": "…", "adminPassword": "…" }

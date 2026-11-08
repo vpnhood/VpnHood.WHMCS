@@ -2,12 +2,13 @@
 // by run-e2e.sh) and returns its JSON. The guard mirrors the shell runners:
 // only the dev box, ever.
 import { execFileSync } from 'node:child_process';
+import { DEV_SSH_HOST, DEV_SSH_USER } from './dev-server.mjs';
 
 const sshKey = process.env.E2E_SSH_KEY;
-const sshHost = process.env.E2E_SSH_HOST ?? 'whmcsdev@webhost-ftps.vpnhood.com';
+const sshHost = process.env.E2E_SSH_HOST ?? DEV_SSH_HOST;
 
 export function setState(scenario) {
-  if (!sshHost.includes('whmcsdev@') || sshHost.includes('account.vpnhood.com')) {
+  if (!sshHost.includes(`${DEV_SSH_USER}@`) || sshHost.includes('account.vpnhood.com')) {
     throw new Error(`REFUSED: state changes only on the dev box, got: ${sshHost}`);
   }
   if (!sshKey) {
