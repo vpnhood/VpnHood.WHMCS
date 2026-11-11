@@ -20,8 +20,7 @@
 # deployed .php with the server's PHP, and smoke-checks the Hub endpoint.
 #
 # Config (env vars, all optional):
-#   WHMCS_DEV_SSH_KEY   default <Vh root>/.user/ssh/ssh.openssh
-#   WHMCS_DEV_SSH_HOST, WHMCS_DEV_WEBROOT, WHMCS_DEV_URL
+#   WHMCS_DEV_SSH_HOST, WHMCS_DEV_SSH_KEY, WHMCS_DEV_WEBROOT, WHMCS_DEV_URL
 #                       default from <Vh root>/.user/whmcs/dev.env, which names the
 #                       dev server so this public repo never does (scripts/dev-server.sh)
 #   PARTNER_REPO        default <Vh root>/VpnHood.WHMCS.Partner
@@ -46,7 +45,7 @@ case "$TARGET" in
 esac
 
 . "$REPO_ROOT/scripts/dev-server.sh"  # the dev WHMCS's names, from <Vh root>/.user/whmcs/dev.env
-SSH_KEY="${WHMCS_DEV_SSH_KEY:-$VH_ROOT/.user/ssh/ssh.openssh}"
+SSH_KEY="$WHMCS_DEV_SSH_KEY"
 SSH_HOST="$WHMCS_DEV_SSH_HOST"
 WEBROOT="$WHMCS_DEV_WEBROOT"
 SITE_URL="$WHMCS_DEV_URL"

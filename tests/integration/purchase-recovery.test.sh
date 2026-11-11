@@ -30,7 +30,7 @@ REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 VH_ROOT="$(cd "$REPO_ROOT/.." && pwd)"
 
 . "$REPO_ROOT/scripts/dev-server.sh"  # the dev WHMCS's names, from <Vh root>/.user/whmcs/dev.env
-SSH_KEY="${WHMCS_DEV_SSH_KEY:-$VH_ROOT/.user/ssh/ssh.openssh}"
+SSH_KEY="$WHMCS_DEV_SSH_KEY"
 SSH_HOST="$WHMCS_DEV_SSH_HOST"
 WEBROOT="$WHMCS_DEV_WEBROOT"
 if [ -f "$SCRIPT_DIR/.env" ]; then set -a; . "$SCRIPT_DIR/.env"; set +a; fi

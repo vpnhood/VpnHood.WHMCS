@@ -22,7 +22,7 @@ REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 VH_ROOT="$(cd "$REPO_ROOT/.." && pwd)"
 
 . "$REPO_ROOT/scripts/dev-server.sh"  # the dev WHMCS's names, from <Vh root>/.user/whmcs/dev.env
-SSH_KEY="${WHMCS_DEV_SSH_KEY:-$VH_ROOT/.user/ssh/ssh.openssh}"
+SSH_KEY="$WHMCS_DEV_SSH_KEY"
 SSH_HOST="$WHMCS_DEV_SSH_HOST"
 # tests and dev deploys run ONLY against the dev box — never production (account.vpnhood.com)
 case "${SSH_HOST:-}${SITE_URL:-}${WHMCS_DEV_URL:-}" in *account.vpnhood.com*) echo "!! REFUSED: production host detected" >&2; exit 1;; esac

@@ -40,7 +40,7 @@ REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 VH_ROOT="$(cd "$REPO_ROOT/.." && pwd)"
 
 . "$REPO_ROOT/scripts/dev-server.sh"  # the dev WHMCS's names, from <Vh root>/.user/whmcs/dev.env
-SSH_KEY="${WHMCS_DEV_SSH_KEY:-$VH_ROOT/.user/ssh/ssh.openssh}"
+SSH_KEY="$WHMCS_DEV_SSH_KEY"
 SSH_HOST="$WHMCS_DEV_SSH_HOST"
 PARTNER_REPO="${PARTNER_REPO:-$VH_ROOT/VpnHood.WHMCS.Partner}"
 OLD_HUB="${OLD_HUB:-v1.2.9}"

@@ -60,11 +60,10 @@ mix test/dev files into the production tree:
 ## Dev server & credentials
 
 - This repo is public and never names the dev WHMCS: no host, SSH user, folder or address, in
-  code, tests or docs. They live in `<Vh root>\.user\whmcs\dev.env` (SSH login, web root, site,
-  and the secrets file holding the admin logins), which `scripts/dev-server.sh` and
+  code, tests or docs. They live in `<Vh root>\.user\whmcs\dev.env` (SSH login and key, web root,
+  site, and the secrets file holding the admin logins), which `scripts/dev-server.sh` and
   `tests/e2e/lib/dev-server.mjs` read; the PHP tests find the web root on the box and ask WHMCS
   for its own address.
-- The SSH key is `<Vh root>\.user\ssh\ssh.openssh`, for the `WHMCS_DEV_SSH_HOST` dev.env names.
 
 ## Where things are
 
