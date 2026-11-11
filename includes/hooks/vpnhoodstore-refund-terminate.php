@@ -1,17 +1,23 @@
 <?php
 
 /**
- * VpnHood Store — a FULL refund follows the admin's Reverse Payment box (lifecycle §8).
+ * VpnHood Store — what a FULL refund does to the key (lifecycle §8).
  *
  * When an invoice is refunded in full, every vpnhoodstore service billed on it follows
  * the answer on WHMCS's own Refund form:
  *
  *  - *Reverse Payment* ticked — the sale is undone: the service is terminated, so the
  *    money and the service go back together.
- *  - Unticked — *refund and keep*, the goodwill gesture: the key is left running to its
- *    original expiry, with the decision logged.
- *  - A refund that did not come from that form (a gateway callback, the API) revokes:
- *    nobody chose to keep the service.
+ *  - Unticked (the form's default) — *refund and keep*: the key is left running to its
+ *    original expiry, with the decision logged. Access usually stays after a refund; it
+ *    depends on the customer, so the admin decides on the form (owner, 2026-11-11).
+ *  - A refund that did not come from that form — a gateway reported it (a refund made in
+ *    Stripe's or PayPal's own dashboard, a gateway callback) or the API booked it — keeps a
+ *    subscription's key to the end of its paid cycle, but never more than one month, and
+ *    then WHMCS ends it with nothing billed again: a monthly key runs out its cycle, a yearly
+ *    one gets a month (owner, 2026-11-11: one month free is fine for anyone who paid us, not
+ *    many months). A one-time code is a reseller's, and a reseller's refund always ends the
+ *    code, so it is still terminated at once.
  *
  * A PARTIAL refund never revokes, whatever the box says. WHMCS fires InvoiceRefunded for
  * EVERY refund transaction and hands the hook nothing but the invoice id, so the amount has
@@ -101,6 +107,74 @@ function vpnhoodstore_refundFormReverse(int $invoiceId): ?bool
     };
 }
 
+/**
+ * The day a subscription refunded outside the Refund form stops: the end of its paid cycle (its
+ * next due date), but never more than one month from today and never before today. Null for a
+ * service with no cycle: a one-time code, which is a reseller's.
+ */
+function vpnhoodstore_refundKeepUntil(int $serviceId): ?string
+{
+    $service = Capsule::table('tblhosting')->where('id', $serviceId)->first(['billingcycle', 'nextduedate']);
+    $due = (string) ($service->nextduedate ?? '');
+    if ($service === null || in_array((string) $service->billingcycle, ['One Time', 'Free Account'], true)
+        || $due === '' || str_starts_with($due, '0000')) {
+        return null;
+    }
+    $today = new \DateTimeImmutable('today');
+    // One month on, on the same day, or the next month's last day: 31 January keeps to the end of
+    // February, never into March.
+    $next = $today->modify('first day of next month');
+    $cap = $next->setDate((int) $next->format('Y'), (int) $next->format('n'),
+        min((int) $today->format('j'), (int) $next->format('t')))->format('Y-m-d');
+    return max($today->format('Y-m-d'), min($due, $cap));
+}
+
+/**
+ * Keep a subscription refunded outside the Refund form running to vpnhoodstore_refundKeepUntil(),
+ * and let WHMCS end it there: an End of Billing Period cancellation request, which WHMCS never
+ * invoices and which the daily cron terminates on the due date (checked on production: six such
+ * requests got no renewal invoice; service #492 was terminated by the 02:00 cron on its due
+ * date). The request goes in before the due date moves, so no invoice run sees the service
+ * without it. A request the customer already made becomes that one: the refund decides when the
+ * key ends. Returns the day, or null when the service has no cycle to keep it to.
+ */
+function vpnhoodstore_keepRefundedSubscription(int $serviceId, int $invoiceId): ?string
+{
+    $until = vpnhoodstore_refundKeepUntil($serviceId);
+    if ($until === null) {
+        return null;
+    }
+
+    $request = Capsule::table('tblcancelrequests')->where('relid', $serviceId)->orderBy('id', 'desc')->first(['id']);
+    if ($request !== null) {
+        Capsule::table('tblcancelrequests')->where('id', $request->id)
+            ->update(['type' => 'End of Billing Period', 'updated_at' => date('Y-m-d H:i:s')]);
+    } else {
+        $added = localAPI('AddCancelRequest', ['serviceid' => $serviceId, 'type' => 'End of Billing Period',
+            'reason' => "Refunded in full outside the Refund form (invoice #{$invoiceId}): kept until {$until}, then ended."]);
+        if (($added['result'] ?? '') !== 'success') {
+            throw new \RuntimeException('AddCancelRequest failed: ' . json_encode($added));
+        }
+    }
+
+    $due = (string) Capsule::table('tblhosting')->where('id', $serviceId)->value('nextduedate');
+    if ($until < $due) {
+        $moved = localAPI('UpdateClientProduct', ['serviceid' => $serviceId, 'nextduedate' => $until]);
+        if (($moved['result'] ?? '') !== 'success') {
+            throw new \RuntimeException("moving the due date to {$until} failed: " . json_encode($moved));
+        }
+        // The key's expiry follows the due date (the module's Renew). If that call fails, the key
+        // keeps its later expiry, and the cron's Terminate on the due date still ends it.
+        $server = new \WHMCS\Module\Server();
+        $renewed = $server->loadByServiceID($serviceId) ? $server->call('Renew') : 'the module did not load';
+        if ($renewed !== 'success') {
+            localAPI('LogActivity', ['description' => "vpnhoodstore: service #{$serviceId}'s key could not be moved to expire on "
+                . "{$until} (" . (is_string($renewed) ? $renewed : json_encode($renewed)) . "); WHMCS still ends it that day."]);
+        }
+    }
+    return $until;
+}
+
 /** Named (not a closure) so the integration test can drive it directly. */
 function vpnhoodstore_refundTerminateHook(array $vars): void
 {
@@ -155,7 +229,23 @@ function vpnhoodstore_refundTerminateHook(array $vars): void
                     "vpnhoodstore: invoice #{$invoiceId} refunded in full — service #{$serviceId} kept (Reverse Payment not ticked)."]);
                 continue;
             }
-            $why = $reverse === true ? 'Reverse Payment ticked' : 'not refunded from the Refund form';
+            if ($reverse === null) {
+                try {
+                    $until = vpnhoodstore_keepRefundedSubscription($serviceId, $invoiceId);
+                } catch (\Throwable $e) {
+                    localAPI('LogActivity', ['description' => "vpnhoodstore: invoice #{$invoiceId} refunded in full outside the Refund "
+                        . "form, but service #{$serviceId} could NOT be set to end on its own ({$e->getMessage()}): it keeps running "
+                        . 'and billing; set its cancellation by hand.']);
+                    continue;
+                }
+                if ($until !== null) {
+                    localAPI('LogActivity', ['description' => "vpnhoodstore: invoice #{$invoiceId} refunded in full outside the Refund "
+                        . "form — service #{$serviceId} kept until {$until} (the end of its paid cycle, at most one month), then "
+                        . 'ended; nothing more is billed.']);
+                    continue;
+                }
+            }
+            $why = $reverse === true ? 'Reverse Payment ticked' : 'a one-time code refunded outside the Refund form';
             $result = localAPI('ModuleTerminate', ['serviceid' => $serviceId]);
             localAPI('LogActivity', ['description' => ($result['result'] ?? '') === 'success'
                 ? "vpnhoodstore: invoice #{$invoiceId} refunded in full — service #{$serviceId} terminated ({$why})."

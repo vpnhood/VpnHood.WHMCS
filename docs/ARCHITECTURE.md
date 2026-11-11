@@ -78,13 +78,20 @@ the ticket-IP option below.
 Two `InvoiceRefunded` hooks, which ship with every hub install:
 
 - `vpnhoodstore-refund-terminate.php` — a FULL refund follows WHMCS's Refund form (lifecycle
-  §8): *Reverse Payment* ticked ends every `vpnhoodstore` service on the invoice, unticked keeps
-  them, and a refund from outside the form (a gateway callback, the API) ends them. The hook gets
-  only the invoice id but runs inside the form's request, so it reads the box from `$_POST`
-  (`sub=refund`, `id`, `reverse` 0/1); `tests/e2e/refund.spec.mjs` drives the real form, so a
-  WHMCS update that renames the field shows there. A partial refund always keeps the key. "In
-  full" is `vpnhoodstore_isRefundedInFull()`: WHMCS marked the invoice Refunded, or the refunds
-  booked against it (`gateway_funds_out` rows) reach its total.
+  §8): *Reverse Payment* ticked ends every `vpnhoodstore` service on the invoice, unticked (the
+  default) keeps them. The hook gets only the invoice id but runs inside the form's request, so
+  it reads the box from `$_POST` (`sub=refund`, `id`, `reverse` 0/1); `tests/e2e/refund.spec.mjs`
+  drives the real form, so a WHMCS update that renames the field shows there. A refund from
+  outside the form (a gateway reported it, a gateway callback marked the invoice Refunded, the
+  API) keeps a subscription to the end of its paid cycle, but never more than one month
+  (`vpnhoodstore_refundKeepUntil()`): it adds an *End of Billing Period* cancellation request
+  (or turns the customer's own request into one), then moves the due date, and the key's expiry
+  through the module's Renew, to that day when the cycle runs longer. WHMCS invoices no service
+  with such a request, cancels its open renewal invoice when the request is added ("cancel
+  invoices on cancellation", on in production), and the daily cron terminates it on the due
+  date. A one-time code is a reseller's and is still terminated at once. A partial refund always
+  keeps the key. "In full" is `vpnhoodstore_isRefundedInFull()`: WHMCS marked the invoice
+  Refunded, or the refunds booked against it (`gateway_funds_out` rows) reach its total.
 - `vpnhood-refund-memory.php` — a full refund of a website invoice (not the `vpnhoodiappay`
   gateway: a store refund is the store's decision and record) remembers the client's address as
   a one-way hash with the date, one row per address (`mod_vpnhood_refund_memory`), for the months
