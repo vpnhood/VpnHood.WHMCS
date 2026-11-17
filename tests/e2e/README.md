@@ -7,7 +7,8 @@ Playwright-driven scripts against the dev WHMCS, which `<Vh root>/.user/whmcs/de
   UI up to a point, then **stop and leave the browser open** so a human reviews and
   confirms (they never click Save themselves).
 - **Automated e2e tests** (`*.spec.mjs`, run through `run-e2e.sh`) — the checkout
-  warning (`cart-notice`), reseller CSV delivery (`reseller-csv`), and the email
+  warning (`cart-notice`), reseller CSV delivery (`reseller-csv`), a single code shown in
+  groups of four, left to right (`single-code`), and the email
   verification checkout hold, twice: `verify-checkout` (a held client — fresh,
   unconfirmed, one unpaid order, created by the state driver — signs in and finds the
   confirmation page naming the waiting invoice, with the invoice itself gated) and

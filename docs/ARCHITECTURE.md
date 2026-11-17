@@ -114,6 +114,27 @@ install can run both packages. Covered by `tests/integration/ticket-ip.test.sh` 
 hooks and daily runs) and `tests/e2e/ticket-ip.spec.mjs` (a ticket opened from the client area,
 where WHMCS records the IP).
 
+### `includes/hooks/vpnhoodstore-welcome-code.php` — the code in the purchase email
+A website buyer's way back to a code, after deleting their account or on a device that never saw
+it, is the copy the purchase delivered (lifecycle §5, §7), so the purchase email carries the code.
+`EmailPreSend` gives the product's welcome email (the template set as a `vpnhoodstore` product's
+Welcome Email) the merge field `{$premium_code}`, read from the access manager by the service's
+`accessTokenId` as the mail goes out; the code is never stored here. It is written as the app
+shows a code (`AccessCodeUtils.Format`: a dash after every four characters, which the app drops
+when it reads one), and the template puts it on a line of its own with `dir="ltr"`: inside
+right-to-left text a code's groups can show in the wrong order. The client area's **Get Premium
+Code** (`assets/ajax-request.js`) shows it the same way. A bulk (CSV) service gets
+none: its codes are downloaded from the client area. A code that cannot be read leaves the mail
+without it, and the reason goes to the activity and module logs: holding back the purchase mail
+would leave the buyer with less.
+
+The template has to show the field. `scripts/welcome-code-template.php` adds the block
+(`{if $premium_code}…{/if}`) to the welcome email of every `vpnhoodstore` product, in every
+language; it replaces an older version of the block and leaves the current one as it is, so run it
+on each install whenever the block changes:
+`ssh <user>@… 'cd <webroot> && php' < scripts/welcome-code-template.php`. Covered by
+`tests/integration/welcome-code.test.sh`.
+
 ### `modules/addons/vpnhoodverify/` (addon) — forced email verification
 Makes email verification mandatory for the client area. WHMCS's own
 `EnableEmailVerification` (General Settings → Security) mails the link and records the

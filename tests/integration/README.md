@@ -194,6 +194,16 @@ overdue notice is aborted with nothing mailed; delivered, they go again. The inv
 mail always goes. Places no order and spends no credit; the invoice is left Cancelled and the
 purchase row removed.
 
+## welcome-code.test.sh — the code in the purchase email
+
+**`welcome-code.test.sh`** — buys a single code as a client of its own on the reserved `.test`
+domain and checks that the product's welcome email gets `{$premium_code}`, the code the access
+manager holds with a dash after every four characters, and that the mail WHMCS sends shows it on a
+left-to-right line of its own; that no other mail about the service gets
+it, nor a bulk (CSV) service; and that a code that cannot be read leaves the mail without it and
+logs why. Needs `scripts/welcome-code-template.php` run on the install. ⚠ Places one real order;
+its token is ended and the client deleted.
+
 ## hub-api.test.sh — Hub API black-box test
 
 A black-box smoke test for the `vpnhoodpartnerhub` API. It drives the live HTTP

@@ -52,8 +52,9 @@
 
                         resultBox.innerHTML = '<div class="alert alert-success">✅ File downloaded.</div>';
                     } else {
-                        const formattedCode = res.data.replace(/(\d{4})(?=\d)/g, "$1-");
-                        resultBox.innerHTML = `<div class="alert alert-success">${formattedCode}</div>`;
+                        // as the app shows a code (AccessCodeUtils.Format), left to right even on a right-to-left page
+                        const formattedCode = res.data.trim().replace(/(.{4})(?=.)/g, "$1-");
+                        resultBox.innerHTML = `<div class="alert alert-success" dir="ltr">${formattedCode}</div>`;
                     }
                 })
                 .catch(error => {
