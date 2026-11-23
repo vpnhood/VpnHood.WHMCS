@@ -372,10 +372,11 @@ saving its id. Establish, for this purchase's creation request (customer id + or
 a service id):
 
 1. **The access server's tokens** for this customer and order
-   (`GET /api/projects/{projectId}/access-tokens?customerId=…&orderId=…&shopId=WHMCS`, or
+   (`GET /api/projects/{projectId}/access-keys?customerId=…&orderId=…&shopId=WHMCS`, or
    VpnHood! MANAGER): a token there is the outcome.
 2. **Nothing listed?** That is final only once no creation request is still running. The access
-   server's request log settles it: each `POST …/projects/{projectId}/access-tokens` since the
+   server's request log settles it: each `POST …/projects/{projectId}/access-keys` (or
+   `…/access-tokens`, as older modules call it) since the
    order was placed needs its `Request finished` line (or the service restarted since, which
    ended it).
 3. **Why it failed** — context, not proof: WHMCS's Activity Log (`Module Create Failed - Service

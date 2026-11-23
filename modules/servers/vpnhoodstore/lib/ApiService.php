@@ -41,19 +41,19 @@ class ApiService
     }
 
     public function createAccessToken(array $createParams): string{
-        return ($this->client)("/projects/{$this->projectId}/access-tokens", 'POST', $createParams);
+        return ($this->client)("/projects/{$this->projectId}/access-keys", 'POST', $createParams);
     }
 
     public function updateAccessToken(string $accessTokenId, array $updateParams):void{
-        ($this->client)("/projects/{$this->projectId}/access-tokens/{$accessTokenId}", 'PATCH', $updateParams);
+        ($this->client)("/projects/{$this->projectId}/access-keys/{$accessTokenId}", 'PATCH', $updateParams);
     }
 
     public function getAccessCode(string $accessTokenId): string{
-        return ($this->client)("/projects/{$this->projectId}/access-tokens/{$accessTokenId}", 'GET');
+        return ($this->client)("/projects/{$this->projectId}/access-keys/{$accessTokenId}", 'GET');
     }
 
     public function getAccessCodeCsvFile(string $customerId, string $orderId): string{
-        return ($this->client)("/projects/{$this->projectId}/access-tokens/export-csv?customerId={$customerId}&orderId={$orderId}&shopId=WHMCS", 'GET');
+        return ($this->client)("/projects/{$this->projectId}/access-keys/export-csv?customerId={$customerId}&orderId={$orderId}&shopId=WHMCS", 'GET');
     }
 
     public function getServerFarms(): array{
@@ -62,11 +62,11 @@ class ApiService
     }
 
     public function getAccessTokenProfiles(): array{
-        $accessTokenProfiles = ($this->client)("/projects/{$this->projectId}/access-token-profiles", 'GET');
+        $accessTokenProfiles = ($this->client)("/projects/{$this->projectId}/access-key-profiles", 'GET');
         return json_decode($accessTokenProfiles);
     }
     public function getAccessTokenGroups(): array{
-        $accessTokenGroups = ($this->client)("/projects/{$this->projectId}/access-token-groups", 'GET');
+        $accessTokenGroups = ($this->client)("/projects/{$this->projectId}/access-key-groups", 'GET');
         return json_decode($accessTokenGroups);
     }
 }

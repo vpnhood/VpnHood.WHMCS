@@ -157,7 +157,7 @@ function tokensOf(int $orderId): array
     $settings = Capsule::table('tbladdonmodules')->where('module', 'vpnhoodconfig')->pluck('value', 'setting');
     $client = \WHMCS\Module\Server\VpnHoodStore\AsyncApiClientFactory::getInstance('https://api.vpnhood.com/api', (string) $settings['APIKey'])
         ->createAsyncClient();
-    $json = json_decode($client('/projects/' . $settings['ProjectId'] . '/access-tokens', 'GET', [
+    $json = json_decode($client('/projects/' . $settings['ProjectId'] . '/access-keys', 'GET', [
         'customerId' => (string) $clientId, 'orderId' => (string) $orderId, 'shopId' => 'WHMCS', 'recordCount' => 100,
     ]), true);
     return array_values(array_map(fn ($item) => (string) $item['accessToken']['accessTokenId'], $json['items'] ?? []));
